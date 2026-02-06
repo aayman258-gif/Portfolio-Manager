@@ -37,16 +37,72 @@ st.sidebar.header("Portfolio Input")
 
 input_method = st.sidebar.radio(
     "How to load positions?",
-    options=["Use Sample Portfolio", "Upload CSV"],
-    help="Sample portfolio for demo, or upload your own positions"
+    options=["Manual Entry", "Use Sample Portfolio", "Upload CSV"],
+    help="Enter positions manually, use sample data, or upload CSV"
 )
 
 positions_df = None
 
-if input_method == "Use Sample Portfolio":
+if input_method == "Manual Entry":
+    st.sidebar.subheader("Add Position")
+
+    # Initialize manual positions in session state if not exists
+    if 'manual_positions' not in st.session_state:
+        st.session_state['manual_positions'] = []
+
+    with st.sidebar.form("add_position_form", clear_on_submit=True):
+        ticker = st.text_input("Ticker Symbol", placeholder="e.g., AAPL").upper()
+        shares = st.number_input("Number of Shares", min_value=0.0, step=1.0, format="%.2f")
+        cost_basis = st.number_input("Cost Basis per Share ($)", min_value=0.0, step=0.01, format="%.2f")
+        purchase_date = st.date_input("Purchase Date (Optional)", value=datetime.now())
+
+        submitted = st.form_submit_button("➕ Add Position")
+
+        if submitted:
+            if ticker and shares > 0 and cost_basis > 0:
+                # Add to manual positions list
+                st.session_state['manual_positions'].append({
+                    'ticker': ticker,
+                    'shares': shares,
+                    'cost_basis': cost_basis,
+                    'purchase_date': purchase_date.strftime('%Y-%m-%d')
+                })
+                st.sidebar.success(f"Added {shares} shares of {ticker}!")
+            else:
+                st.sidebar.error("Please fill in all required fields")
+
+    # Show current manual positions
+    if st.session_state['manual_positions']:
+        st.sidebar.subheader(f"Current Positions ({len(st.session_state['manual_positions'])})")
+
+        for idx, pos in enumerate(st.session_state['manual_positions']):
+            col1, col2 = st.sidebar.columns([3, 1])
+            with col1:
+                st.sidebar.text(f"{pos['ticker']}: {pos['shares']} @ ${pos['cost_basis']:.2f}")
+            with col2:
+                if st.sidebar.button("🗑️", key=f"delete_{idx}"):
+                    st.session_state['manual_positions'].pop(idx)
+                    st.rerun()
+
+        # Convert manual positions to DataFrame
+        positions_df = pd.DataFrame(st.session_state['manual_positions'])
+        st.session_state['positions'] = positions_df
+
+        if st.sidebar.button("🗑️ Clear All Positions"):
+            st.session_state['manual_positions'] = []
+            if 'positions' in st.session_state:
+                del st.session_state['positions']
+            st.rerun()
+    else:
+        st.sidebar.info("No positions added yet. Use the form above to add your first position.")
+
+elif input_method == "Use Sample Portfolio":
     if st.sidebar.button("Load Sample Portfolio"):
         positions_df = loader.create_sample_portfolio()
         st.session_state['positions'] = positions_df
+        # Clear manual positions when loading sample
+        if 'manual_positions' in st.session_state:
+            st.session_state['manual_positions'] = []
         st.sidebar.success("Sample portfolio loaded!")
 
 elif input_method == "Upload CSV":
@@ -65,6 +121,9 @@ elif input_method == "Upload CSV":
         try:
             positions_df = loader.load_from_csv(uploaded_file)
             st.session_state['positions'] = positions_df
+            # Clear manual positions when loading CSV
+            if 'manual_positions' in st.session_state:
+                st.session_state['manual_positions'] = []
             st.sidebar.success(f"Loaded {len(positions_df)} positions!")
         except Exception as e:
             st.sidebar.error(f"Error: {str(e)}")
@@ -304,16 +363,23 @@ if positions_df is not None and not positions_df.empty:
     )
 
 else:
-    st.info("👈 Load a portfolio using the sidebar to get started!")
+    st.info("👈 Add positions using the sidebar to get started!")
 
     st.markdown("""
     ### Getting Started
 
-    **Option 1: Use Sample Portfolio**
+    **Option 1: Manual Entry (Recommended)**
+    - Select "Manual Entry" in the sidebar
+    - Enter ticker symbol, number of shares, and cost basis
+    - Click "Add Position" to add to your portfolio
+    - Add multiple positions one by one
+    - Delete individual positions or clear all
+
+    **Option 2: Use Sample Portfolio**
     - Click "Load Sample Portfolio" in the sidebar
     - See a demo portfolio with 5 positions
 
-    **Option 2: Upload Your Own Positions**
+    **Option 3: Upload Your Own Positions**
     - Prepare a CSV file with your positions
     - Required columns: `ticker`, `shares`, `cost_basis`
     - Optional column: `purchase_date`
