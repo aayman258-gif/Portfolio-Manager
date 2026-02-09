@@ -2,9 +2,27 @@
 
 A comprehensive portfolio management system that combines regime detection, options trading analytics, and multi-leg options strategy building to maximize profitability.
 
+## Quick Start
+
+**Run locally in 2 steps:**
+
+```bash
+# 1. Install dependencies (first time only)
+pip install -r requirements.txt
+
+# 2. Run the app
+./run.sh          # macOS/Linux
+run.bat           # Windows
+```
+
+The app will open at **http://localhost:8501**
+
+See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions.
+
 ## Features
 
 ### 1. Portfolio Position Tracker
+- **Manual entry** - Enter positions directly on the website
 - Load positions from CSV or sample data
 - Real-time P&L tracking
 - Holdings breakdown and allocation analysis
@@ -77,9 +95,18 @@ streamlit run Home.py
 ## Usage
 
 ### Loading Your Portfolio
-Upload a CSV file with columns: `ticker`, `quantity`, `cost_basis`, `purchase_date`
 
-Or use the sample data to explore features.
+**Option 1: Manual Entry (Recommended)**
+- Enter positions directly on the website
+- Add ticker, shares, and cost basis one by one
+- Perfect for quick portfolio setup
+
+**Option 2: CSV Upload**
+- Upload a CSV file with columns: `ticker`, `shares`, `cost_basis`, `purchase_date`
+- Great for bulk imports
+
+**Option 3: Sample Data**
+- Use the sample portfolio to explore features
 
 ### Analyzing Market Regime
 Navigate to "Market Regime Dashboard" to see current market conditions and how they affect your strategy.
