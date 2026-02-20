@@ -13,6 +13,8 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from utils.theme import apply_dark_theme
+
 from calculations.optimizer import RegimeAwareOptimizer
 from calculations.regime_detector import RegimeDetector
 from data.portfolio_loader import PortfolioLoader
@@ -25,6 +27,7 @@ st.set_page_config(
     page_icon="⚖️",
     layout="wide"
 )
+apply_dark_theme()
 
 st.title("⚖️ Portfolio Optimization & Rebalancing")
 st.markdown("**Section 4:** Generate regime-aware optimal allocation and rebalancing recommendations")
@@ -240,7 +243,7 @@ if 'optimization_result' in st.session_state:
         xaxis_title="Ticker",
         yaxis_title="Weight (%)",
         height=400,
-        template='plotly_white'
+        template='plotly_dark'
     )
 
     st.plotly_chart(fig_bar, use_container_width=True)

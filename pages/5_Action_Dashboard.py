@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from utils.theme import apply_dark_theme
+
 from calculations.regime_detector import RegimeDetector
 from calculations.scoring_engine import ScoringEngine
 from calculations.optimizer import RegimeAwareOptimizer
@@ -28,6 +30,7 @@ st.set_page_config(
     page_icon="🎯",
     layout="wide"
 )
+apply_dark_theme()
 
 st.title("🎯 Action Dashboard")
 st.markdown("**What should I do today?**")
@@ -307,7 +310,7 @@ with col1:
         xaxis_title="",
         yaxis_title="P&L ($)",
         height=300,
-        template='plotly_white',
+        template='plotly_dark',
         showlegend=False
     )
 

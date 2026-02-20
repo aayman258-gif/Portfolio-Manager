@@ -22,7 +22,8 @@ class OptionsAnalytics:
         T: float,
         sigma: float,
         option_type: str = 'call',
-        r: float = None
+        r: float = None,
+        q: float = 0.0
     ) -> float:
         """
         Black-Scholes option pricing
@@ -48,13 +49,13 @@ class OptionsAnalytics:
             else:
                 return max(K - S, 0)
 
-        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
 
         if option_type == 'call':
-            price = S * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
+            price = S * np.exp(-q * T) * norm.cdf(d1) - K * np.exp(-r * T) * norm.cdf(d2)
         else:
-            price = K * np.exp(-r * T) * norm.cdf(-d2) - S * norm.cdf(-d1)
+            price = K * np.exp(-r * T) * norm.cdf(-d2) - S * np.exp(-q * T) * norm.cdf(-d1)
 
         return price
 
@@ -65,7 +66,8 @@ class OptionsAnalytics:
         T: float,
         sigma: float,
         option_type: str = 'call',
-        r: float = None
+        r: float = None,
+        q: float = 0.0
     ) -> Dict[str, float]:
         """
         Calculate all Greeks for an option
@@ -85,32 +87,35 @@ class OptionsAnalytics:
                 'rho': 0.0
             }
 
-        d1 = (np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+        d1 = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
         d2 = d1 - sigma * np.sqrt(T)
+        Sq = S * np.exp(-q * T)
 
         # Delta
         if option_type == 'call':
-            delta = norm.cdf(d1)
+            delta = np.exp(-q * T) * norm.cdf(d1)
         else:
-            delta = norm.cdf(d1) - 1
+            delta = np.exp(-q * T) * (norm.cdf(d1) - 1)
 
         # Gamma (same for call and put)
-        gamma = norm.pdf(d1) / (S * sigma * np.sqrt(T))
+        gamma = np.exp(-q * T) * norm.pdf(d1) / (S * sigma * np.sqrt(T))
 
         # Theta
         if option_type == 'call':
             theta = (
-                -S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
+                -Sq * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
                 - r * K * np.exp(-r * T) * norm.cdf(d2)
+                + q * Sq * norm.cdf(d1)
             ) / 365  # Daily theta
         else:
             theta = (
-                -S * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
+                -Sq * norm.pdf(d1) * sigma / (2 * np.sqrt(T))
                 + r * K * np.exp(-r * T) * norm.cdf(-d2)
+                - q * Sq * norm.cdf(-d1)
             ) / 365  # Daily theta
 
         # Vega (same for call and put)
-        vega = S * norm.pdf(d1) * np.sqrt(T) / 100  # Per 1% change in IV
+        vega = Sq * norm.pdf(d1) * np.sqrt(T) / 100  # Per 1% change in IV
 
         # Rho
         if option_type == 'call':
@@ -136,6 +141,7 @@ class OptionsAnalytics:
         market_price: float,
         option_type: str = 'call',
         r: float = None,
+        q: float = 0.0,
         max_iterations: int = 100,
         tolerance: float = 0.0001
     ) -> float:
@@ -153,8 +159,9 @@ class OptionsAnalytics:
 
         for i in range(max_iterations):
             # Calculate price and vega
-            price = self.black_scholes(S, K, T, sigma, option_type, r)
-            vega = S * norm.pdf((np.log(S / K) + (r + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))) * np.sqrt(T)
+            price = self.black_scholes(S, K, T, sigma, option_type, r, q)
+            d1_merton = (np.log(S / K) + (r - q + 0.5 * sigma**2) * T) / (sigma * np.sqrt(T))
+            vega = S * np.exp(-q * T) * norm.pdf(d1_merton) * np.sqrt(T)
 
             # Newton-Raphson update
             diff = market_price - price
@@ -181,7 +188,8 @@ class OptionsAnalytics:
         option_type: str,
         contracts: int,
         premium_paid: float = None,
-        current_price: float = None
+        current_price: float = None,
+        q: float = 0.0
     ) -> Dict:
         """
         Comprehensive analysis of an option position
@@ -200,10 +208,10 @@ class OptionsAnalytics:
             Dictionary with all analytics
         """
         # Calculate theoretical value
-        theoretical_value = self.black_scholes(S, K, T, sigma, option_type)
+        theoretical_value = self.black_scholes(S, K, T, sigma, option_type, q=q)
 
         # Calculate Greeks
-        greeks = self.calculate_greeks(S, K, T, sigma, option_type)
+        greeks = self.calculate_greeks(S, K, T, sigma, option_type, q=q)
 
         # Position Greeks (adjusted for number of contracts)
         position_greeks = {

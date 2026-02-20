@@ -14,6 +14,8 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from utils.theme import apply_dark_theme
+
 from calculations.scoring_engine import ScoringEngine
 from calculations.regime_detector import RegimeDetector
 from data.portfolio_loader import PortfolioLoader
@@ -26,6 +28,7 @@ st.set_page_config(
     page_icon="⭐",
     layout="wide"
 )
+apply_dark_theme()
 
 st.title("⭐ Position Scoring Engine")
 st.markdown("**Section 3:** Score each position on quant signals and fundamental metrics")
@@ -174,7 +177,7 @@ if scores_data:
             xaxis_title="Ticker",
             yaxis_title="Score (0-100)",
             height=400,
-            template='plotly_white'
+            template='plotly_dark'
         )
 
         fig_scores.add_hline(y=80, line_dash="dash", line_color="green", opacity=0.5)
@@ -204,7 +207,7 @@ if scores_data:
             xaxis_title="Quant Score",
             yaxis_title="Fundamental Score",
             height=400,
-            template='plotly_white'
+            template='plotly_dark'
         )
 
         fig_scatter.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.3)

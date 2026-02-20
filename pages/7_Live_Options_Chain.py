@@ -16,6 +16,8 @@ from datetime import datetime
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from utils.theme import apply_dark_theme, dark_plotly_layout
+
 from data.options_data import OptionsDataLoader
 from calculations.options_analytics import OptionsAnalytics
 from calculations.strategy_builder import StrategyBuilder
@@ -27,6 +29,7 @@ st.set_page_config(
     page_icon="🔴",
     layout="wide"
 )
+apply_dark_theme()
 
 st.title("🔴 Live Options Chain")
 st.markdown("**Section 7:** Pull real-time options data from public API")
@@ -123,12 +126,13 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
         st.info(f"**Expiration:** {selected_expiration} | **Days to Expiry:** {days_to_exp} | **Underlying:** ${underlying_price:.2f}")
 
         # Tabs
-        tab1, tab2, tab3, tab4, tab5 = st.tabs([
+        tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
             "📊 Options Chain",
             "🔥 High Volume Options",
             "📈 IV Smile",
             "⚡ Quick Analyze",
-            "🔧 Strategy Builder"
+            "🔧 Strategy Builder",
+            "📉 Backtest Strategy"
         ])
 
         # === TAB 1: FULL OPTIONS CHAIN ===
@@ -329,7 +333,7 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                     yaxis_title="Volume",
                     barmode='group',
                     height=400,
-                    template='plotly_white'
+                    template='plotly_dark'
                 )
 
                 st.plotly_chart(fig_vol, use_container_width=True)
@@ -380,7 +384,7 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                     xaxis_title="Strike Price ($)",
                     yaxis_title="Implied Volatility (%)",
                     height=500,
-                    template='plotly_white',
+                    template='plotly_dark',
                     hovermode='x unified'
                 )
 
@@ -802,7 +806,7 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                             xaxis_title="Underlying Price at Expiration ($)",
                             yaxis_title="Profit/Loss ($)",
                             height=500,
-                            template='plotly_white',
+                            template='plotly_dark',
                             hovermode='x unified'
                         )
 
@@ -871,6 +875,280 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                 - **Straddle/Strangle**: Volatility plays
                 - **Butterflies**: Precise price target strategies
                 """)
+
+        # === TAB 6: BACKTEST STRATEGY ===
+        with tab6:
+            import yfinance as yf
+            from calculations.regime_detector import RegimeDetector as _RD
+
+            st.subheader("📉 Options Strategy Backtester")
+            st.markdown(
+                "Simulates buying a strategy at rolling entry points using historical prices "
+                "and realized volatility as a proxy for IV.  P&L is measured at expiry."
+            )
+
+            # ── Controls ──────────────────────────────────────────────────────
+            col_a, col_b, col_c = st.columns(3)
+
+            with col_a:
+                bt_strategy = st.selectbox(
+                    "Strategy",
+                    [
+                        "Long ATM Call",
+                        "Long OTM Put (Protective)",
+                        "Iron Condor",
+                        "Bull Call Spread",
+                        "Bear Put Spread",
+                    ],
+                    key="bt_strategy"
+                )
+                bt_dte = st.select_slider(
+                    "Days to Expiration",
+                    options=[14, 21, 30, 45, 60],
+                    value=30,
+                    key="bt_dte"
+                )
+
+            with col_b:
+                bt_offset_pct = st.slider(
+                    "Strike Offset from ATM (%)",
+                    min_value=1.0, max_value=12.0, value=5.0, step=0.5,
+                    help="OTM distance used for spread wings and protective strikes",
+                    key="bt_offset"
+                )
+                bt_period = st.selectbox(
+                    "Lookback Period",
+                    ["6mo", "1y", "2y", "3y"],
+                    index=1,
+                    key="bt_period"
+                )
+
+            with col_c:
+                bt_risk_free = st.number_input(
+                    "Risk-Free Rate (%)", value=4.5, step=0.25, key="bt_rf"
+                ) / 100
+                st.metric("Ticker", ticker)
+                st.metric("Current Price", f"${underlying_price:.2f}")
+
+            # ── Compute button ─────────────────────────────────────────────────
+            run_bt = st.button("▶  Run Backtest", type="primary", use_container_width=True, key="run_bt")
+
+            @st.cache_data(show_spinner="Running backtest…")
+            def _run_backtest(ticker_, strategy_, dte_, offset_pct_, period_, r_):
+                """Vectorised backtest — cached for performance."""
+                import numpy as _np
+                import pandas as _pd
+
+                hist = yf.Ticker(ticker_).history(period=period_)
+                if hist.empty:
+                    return _pd.DataFrame()
+
+                prices_ = hist['Close'].copy()
+                prices_.index = _pd.to_datetime(prices_.index).tz_localize(None)
+
+                det = _RD(lookback_vol=20, lookback_trend=50)
+                regime_, _ = det.classify_regime(prices_)
+
+                returns_ = prices_.pct_change()
+                realized_vol_ = returns_.rolling(20).std() * _np.sqrt(252)
+
+                _calc = OptionsAnalytics()
+                T_ = dte_ / 365.0
+                off = offset_pct_ / 100.0
+
+                def _pnl(S, S_T, sig):
+                    sig = max(min(float(sig), 2.0), 0.05)
+                    call_pay = lambda K: max(float(S_T) - K, 0)
+                    put_pay  = lambda K: max(K - float(S_T), 0)
+
+                    if strategy_ == "Long ATM Call":
+                        K = float(S)
+                        cost = _calc.black_scholes(S, K, T_, sig, 'call', r_)
+                        return (call_pay(K) - cost) * 100
+
+                    elif strategy_ == "Long OTM Put (Protective)":
+                        K = float(S) * (1 - off)
+                        cost = _calc.black_scholes(S, K, T_, sig, 'put', r_)
+                        return (put_pay(K) - cost) * 100
+
+                    elif strategy_ == "Iron Condor":
+                        ps, pl = S * (1 - off), S * (1 - 2 * off)
+                        cs, cl = S * (1 + off), S * (1 + 2 * off)
+                        credit = (
+                            _calc.black_scholes(S, ps, T_, sig, 'put',  r_)
+                            - _calc.black_scholes(S, pl, T_, sig, 'put',  r_)
+                            + _calc.black_scholes(S, cs, T_, sig, 'call', r_)
+                            - _calc.black_scholes(S, cl, T_, sig, 'call', r_)
+                        )
+                        loss = (
+                            (put_pay(ps)  - put_pay(pl))
+                            + (call_pay(cs) - call_pay(cl))
+                        )
+                        return (credit - loss) * 100
+
+                    elif strategy_ == "Bull Call Spread":
+                        lK, sK = float(S), S * (1 + off)
+                        cost = _calc.black_scholes(S, lK, T_, sig, 'call', r_) \
+                             - _calc.black_scholes(S, sK, T_, sig, 'call', r_)
+                        return (call_pay(lK) - call_pay(sK) - cost) * 100
+
+                    elif strategy_ == "Bear Put Spread":
+                        lK, sK = float(S), S * (1 - off)
+                        cost = _calc.black_scholes(S, lK, T_, sig, 'put', r_) \
+                             - _calc.black_scholes(S, sK, T_, sig, 'put', r_)
+                        return (put_pay(lK) - put_pay(sK) - cost) * 100
+
+                    return 0.0
+
+                rows = []
+                step = 5  # enter every 5 trading days
+                for i in range(30, len(prices_) - dte_ - 2, step):
+                    S_  = float(prices_.iloc[i])
+                    S_T = float(prices_.iloc[i + dte_])
+                    sig = float(realized_vol_.iloc[i]) if not _pd.isna(realized_vol_.iloc[i]) else 0.20
+                    reg = regime_.iloc[i]
+                    pnl = _pnl(S_, S_T, sig)
+                    rows.append({
+                        'date':     prices_.index[i],
+                        'S':        S_,
+                        'S_T':      S_T,
+                        'move_pct': (S_T - S_) / S_ * 100,
+                        'IV_proxy': sig * 100,
+                        'regime':   reg,
+                        'pnl':      pnl,
+                    })
+                return _pd.DataFrame(rows)
+
+            if run_bt or st.session_state.get('bt_df') is not None:
+                if run_bt:
+                    df_bt = _run_backtest(
+                        ticker, bt_strategy, bt_dte,
+                        bt_offset_pct, bt_period, bt_risk_free
+                    )
+                    st.session_state['bt_df'] = df_bt
+                else:
+                    df_bt = st.session_state.get('bt_df', None)
+
+                if df_bt is not None and not df_bt.empty:
+                    valid = df_bt[df_bt['regime'] != 'Unknown'].copy()
+
+                    # ── Summary metrics ──────────────────────────────────────
+                    total_trades = len(valid)
+                    winners = (valid['pnl'] > 0).sum()
+                    win_rate = winners / total_trades * 100 if total_trades else 0
+                    avg_pnl = valid['pnl'].mean()
+                    best = valid['pnl'].max()
+                    worst = valid['pnl'].min()
+                    total_pnl = valid['pnl'].sum()
+
+                    c1, c2, c3, c4, c5 = st.columns(5)
+                    c1.metric("Trades", total_trades)
+                    c2.metric("Win Rate", f"{win_rate:.1f}%")
+                    c3.metric("Avg P&L", f"${avg_pnl:+.0f}")
+                    c4.metric("Best Trade", f"${best:+.0f}")
+                    c5.metric("Worst Trade", f"${worst:+.0f}")
+
+                    # ── Cumulative P&L chart ─────────────────────────────────
+                    st.markdown("### Cumulative P&L Over Time")
+                    valid_sorted = valid.sort_values('date').copy()
+                    valid_sorted['cum_pnl'] = valid_sorted['pnl'].cumsum()
+
+                    _rc_bt = {
+                        'Low Vol': '#22c55e', 'High Vol': '#ef4444',
+                        'Trending': '#4a9eff', 'Mean Reversion': '#f59e0b', 'Unknown': '#6b7a8f'
+                    }
+
+                    fig_cum = go.Figure()
+                    fig_cum.add_trace(go.Scatter(
+                        x=valid_sorted['date'], y=valid_sorted['cum_pnl'],
+                        mode='lines', name='Cumulative P&L',
+                        line=dict(color='#00d4aa', width=2.5),
+                        fill='tozeroy', fillcolor='rgba(0,212,170,0.08)'
+                    ))
+
+                    # Colour dots by regime
+                    for reg_name, reg_col in _rc_bt.items():
+                        mask = valid_sorted['regime'] == reg_name
+                        if mask.sum():
+                            fig_cum.add_trace(go.Scatter(
+                                x=valid_sorted.loc[mask, 'date'],
+                                y=valid_sorted.loc[mask, 'cum_pnl'],
+                                mode='markers', name=reg_name,
+                                marker=dict(color=reg_col, size=6, opacity=0.7)
+                            ))
+
+                    fig_cum.add_hline(y=0, line_color='#6b7a8f', line_dash='dash')
+                    fig_cum.update_layout(
+                        **dark_plotly_layout(height=400, hovermode='x unified',
+                                             title=f"{bt_strategy} — Cumulative P&L")
+                    )
+                    st.plotly_chart(fig_cum, use_container_width=True)
+
+                    # ── Per-regime breakdown ─────────────────────────────────
+                    st.markdown("### Performance by Regime")
+
+                    regime_stats = valid.groupby('regime')['pnl'].agg(
+                        Trades='count',
+                        Win_Rate=lambda x: (x > 0).mean() * 100,
+                        Avg_PnL='mean',
+                        Total_PnL='sum',
+                        Best='max',
+                        Worst='min'
+                    ).reset_index()
+
+                    regime_stats = regime_stats.rename(columns={
+                        'regime': 'Regime', 'Trades': 'Trades',
+                        'Win_Rate': 'Win Rate (%)', 'Avg_PnL': 'Avg P&L ($)',
+                        'Total_PnL': 'Total P&L ($)', 'Best': 'Best ($)', 'Worst': 'Worst ($)'
+                    })
+
+                    st.dataframe(
+                        regime_stats.style.format({
+                            'Win Rate (%)': '{:.1f}%',
+                            'Avg P&L ($)': '${:+.0f}',
+                            'Total P&L ($)': '${:+,.0f}',
+                            'Best ($)': '${:+.0f}',
+                            'Worst ($)': '${:+.0f}'
+                        }).background_gradient(subset=['Win Rate (%)'], cmap='RdYlGn'),
+                        use_container_width=True, hide_index=True
+                    )
+
+                    # ── P&L distribution chart ───────────────────────────────
+                    st.markdown("### P&L Distribution")
+
+                    fig_dist = go.Figure()
+                    for reg_name, reg_col in _rc_bt.items():
+                        mask = valid['regime'] == reg_name
+                        if mask.sum():
+                            fig_dist.add_trace(go.Box(
+                                y=valid.loc[mask, 'pnl'],
+                                name=reg_name,
+                                marker_color=reg_col,
+                                boxmean=True
+                            ))
+
+                    fig_dist.add_hline(y=0, line_color='#6b7a8f', line_dash='dash')
+                    fig_dist.update_layout(
+                        **dark_plotly_layout(height=400,
+                                             title="P&L Distribution by Regime ($)",
+                                             yaxis_title="P&L per Trade ($)")
+                    )
+                    st.plotly_chart(fig_dist, use_container_width=True)
+
+                    # ── Raw data expander ────────────────────────────────────
+                    with st.expander("📋 Raw Trade Log"):
+                        st.dataframe(
+                            valid[['date', 'regime', 'S', 'S_T', 'move_pct', 'IV_proxy', 'pnl']]
+                            .sort_values('date', ascending=False)
+                            .style.format({
+                                'S': '${:.2f}', 'S_T': '${:.2f}',
+                                'move_pct': '{:+.2f}%', 'IV_proxy': '{:.1f}%',
+                                'pnl': '${:+.0f}'
+                            }),
+                            use_container_width=True, hide_index=True
+                        )
+                else:
+                    st.warning("Not enough historical data to run backtest. Try a longer lookback period.")
 
 else:
     st.info("👈 Enter a ticker symbol in the sidebar and click 'Load Options Chain' to get started")

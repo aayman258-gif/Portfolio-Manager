@@ -16,7 +16,14 @@ sys.path.append(str(Path(__file__).parent))
 
 from data.portfolio_loader import PortfolioLoader
 from calculations.performance import PerformanceAnalytics
+from utils.theme import apply_dark_theme, dark_plotly_layout
 
+# Distinct color palette for holdings
+_HOLDING_COLORS = [
+    '#00d4aa', '#7B68EE', '#FF8C00', '#45B7D1', '#DDA0DD',
+    '#4ECDC4', '#F7DC6F', '#EB984E', '#5DADE2', '#58D68D',
+    '#BB8FCE', '#96CEB4', '#FF6B6B', '#98D8C8', '#FFEAA7',
+]
 
 # Page config
 st.set_page_config(
@@ -24,6 +31,7 @@ st.set_page_config(
     page_icon="💼",
     layout="wide"
 )
+apply_dark_theme()
 
 st.title("💼 Portfolio Position Tracker")
 st.markdown("**Section 1:** Load and track current positions with basic P&L, holdings breakdown, and performance metrics")
@@ -210,22 +218,22 @@ if positions_df is not None and not positions_df.empty:
     col1, col2 = st.columns(2)
 
     with col1:
-        # Pie chart by value
+        # Pie chart by value — one distinct color per holding
+        n = len(position_metrics)
+        holding_colors = [_HOLDING_COLORS[i % len(_HOLDING_COLORS)] for i in range(n)]
+
         fig_pie = go.Figure(data=[go.Pie(
             labels=position_metrics['ticker'],
             values=position_metrics['current_value'],
             hole=0.3,
             textinfo='label+percent',
-            marker=dict(
-                colors=position_metrics['total_pnl'].apply(
-                    lambda x: '#00CC00' if x > 0 else '#FF6B6B' if x < 0 else '#95A5A6'
-                )
-            )
+            marker=dict(colors=holding_colors)
         )])
 
         fig_pie.update_layout(
             title="Portfolio Allocation by Value",
-            height=400
+            height=400,
+            **dark_plotly_layout()
         )
 
         st.plotly_chart(fig_pie, use_container_width=True)
@@ -315,7 +323,7 @@ if positions_df is not None and not positions_df.empty:
                 yaxis_title="Cumulative Return (%)",
                 height=400,
                 hovermode='x unified',
-                template='plotly_white'
+                **dark_plotly_layout()
             )
 
             fig_cum.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
@@ -342,7 +350,7 @@ if positions_df is not None and not positions_df.empty:
                 xaxis_title="Date",
                 yaxis_title="Drawdown (%)",
                 height=300,
-                template='plotly_white'
+                **dark_plotly_layout()
             )
 
             st.plotly_chart(fig_dd, use_container_width=True)

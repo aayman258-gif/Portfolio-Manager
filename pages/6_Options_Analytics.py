@@ -15,6 +15,8 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
+from utils.theme import apply_dark_theme
+
 from calculations.options_analytics import OptionsAnalytics
 from calculations.options_recommender import OptionsRecommender
 from calculations.regime_detector import RegimeDetector
@@ -27,6 +29,7 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
+apply_dark_theme()
 
 st.title("📊 Options Analytics & Trading")
 st.markdown("**Section 6:** Analyze options positions with Greeks and get regime-aware recommendations")
@@ -226,6 +229,14 @@ with tab2:
             step=0.1
         ) / 100
 
+        dividend_yield = st.slider(
+            "Dividend Yield (%)",
+            min_value=0.0,
+            max_value=10.0,
+            value=0.0,
+            step=0.1
+        ) / 100
+
     # Optional: Premium and market price for P&L
     st.markdown("### Optional: P&L Analysis")
     col_a, col_b = st.columns(2)
@@ -264,7 +275,8 @@ with tab2:
             option_type=option_type,
             contracts=contracts,
             premium_paid=premium_paid,
-            current_price=current_market_price
+            current_price=current_market_price,
+            q=dividend_yield
         )
 
         # Display results
@@ -430,10 +442,10 @@ with tab2:
         deltas = []
 
         for price in price_range:
-            value = options_calc.black_scholes(price, strike_price, time_to_exp, implied_vol, option_type, risk_free)
+            value = options_calc.black_scholes(price, strike_price, time_to_exp, implied_vol, option_type, risk_free, dividend_yield)
             option_values.append(value * contracts * 100)  # Total position value
 
-            greek = options_calc.calculate_greeks(price, strike_price, time_to_exp, implied_vol, option_type, risk_free)
+            greek = options_calc.calculate_greeks(price, strike_price, time_to_exp, implied_vol, option_type, risk_free, dividend_yield)
             deltas.append(greek['delta'])
 
         # Plot
@@ -462,7 +474,7 @@ with tab2:
         fig.add_vline(x=underlying_price, line_dash="dash", line_color="gray", row=2, col=1)
         fig.add_vline(x=strike_price, line_dash="dash", line_color="red", row=2, col=1)
 
-        fig.update_layout(height=600, showlegend=False, template='plotly_white')
+        fig.update_layout(height=600, showlegend=False, template='plotly_dark')
         fig.update_xaxes(title_text="Underlying Price ($)", row=2, col=1)
         fig.update_yaxes(title_text="Position Value ($)", row=1, col=1)
         fig.update_yaxes(title_text="Delta", row=2, col=1)
