@@ -21,6 +21,7 @@ from utils.theme import apply_dark_theme, dark_plotly_layout
 from data.options_data import OptionsDataLoader
 from calculations.options_analytics import OptionsAnalytics
 from calculations.strategy_builder import StrategyBuilder
+from calculations.probability_utils import probability_of_profit, expected_value, probability_of_touching
 
 
 # Page config
@@ -841,6 +842,62 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                                 st.info("📊 **Long Vega**: Benefits from IV increase")
                             elif greeks['vega'] < -50:
                                 st.info("📊 **Short Vega**: Benefits from IV decrease")
+
+                        # ── Probability Analysis ──────────────────────────────────────────
+                        if time_to_exp > 0:
+                            with st.expander("📊 Probability Analysis", expanded=True):
+                                _atm_idx = max(0, len(calls) // 2)
+                                _atm_iv  = float(calls['impliedVolatility'].iloc[_atm_idx]) if not calls.empty else 0.25
+                                _atm_iv  = max(_atm_iv, 0.05)
+                                _r       = 0.045
+
+                                _pop = probability_of_profit(underlying_price, builder, _atm_iv, _r, time_to_exp)
+                                _ev  = expected_value(underlying_price, builder, _atm_iv, _r, time_to_exp)
+
+                                _pc1, _pc2, _pc3 = st.columns(3)
+                                _pc1.metric("Probability of Profit", f"{_pop:.1%}")
+                                _pc2.metric("Expected Value",        f"${_ev:,.0f}")
+                                _pc3.metric("Breakevens",            len(summary['breakevens']))
+
+                                # PoP gauge
+                                _fig_gauge = go.Figure(go.Indicator(
+                                    mode="gauge+number",
+                                    value=_pop * 100,
+                                    number={'suffix': '%', 'font': {'color': '#e8edf3'}},
+                                    gauge={
+                                        'axis': {'range': [0, 100]},
+                                        'bar':  {'color': '#00d4aa'},
+                                        'steps': [
+                                            {'range': [0,  40], 'color': '#3a1515'},
+                                            {'range': [40, 60], 'color': '#2d2a15'},
+                                            {'range': [60, 100], 'color': '#1a3a1a'},
+                                        ],
+                                    },
+                                    title={'text': 'Probability of Profit',
+                                           'font': {'color': '#e8edf3'}}
+                                ))
+                                _fig_gauge.update_layout(**dark_plotly_layout(height=220))
+                                st.plotly_chart(_fig_gauge, use_container_width=True)
+
+                                # Touch probabilities for short legs
+                                _short_legs = [l for l in builder.legs if l['contracts'] < 0]
+                                if _short_legs:
+                                    st.markdown("**Short Strike Touch Probabilities**")
+                                    for _leg in _short_legs:
+                                        _touch = probability_of_touching(
+                                            underlying_price, _leg['strike'],
+                                            _atm_iv, _r, time_to_exp
+                                        )
+                                        _tc = ('#22c55e' if _touch < 0.3
+                                               else '#f59e0b' if _touch < 0.5
+                                               else '#ef4444')
+                                        st.markdown(
+                                            f"- Strike **${_leg['strike']:.1f}** "
+                                            f"({_leg['option_type']}): "
+                                            f"<span style='color:{_tc}'>"
+                                            f"{_touch:.1%} touch probability</span>",
+                                            unsafe_allow_html=True
+                                        )
 
                     else:
                         st.error(summary['error'])

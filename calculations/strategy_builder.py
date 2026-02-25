@@ -78,6 +78,18 @@ class StrategyBuilder:
                     {'type': 'call', 'position': 'long', 'strike_offset': 0.03}   # Long upper
                 ],
                 'description': 'Buy lower call, sell 2x ATM calls, buy upper call'
+            },
+            'Long Call': {
+                'legs': [
+                    {'type': 'call', 'position': 'long', 'strike_offset': 0.0}    # Long ATM call
+                ],
+                'description': 'Buy ATM call, profit if price rises'
+            },
+            'Long Put': {
+                'legs': [
+                    {'type': 'put', 'position': 'long', 'strike_offset': 0.0}     # Long ATM put
+                ],
+                'description': 'Buy ATM put, profit if price falls'
             }
         }
 
@@ -394,6 +406,10 @@ class StrategyBuilder:
 
         self.clear_legs()
 
+        # Track strikes already assigned per option type so spread legs never
+        # collapse onto the same strike on sparse chains (e.g. LEAPS).
+        used_strikes: dict = {}
+
         for leg_template in template['legs']:
             option_type = leg_template['type']
             position = leg_template['position']
@@ -412,9 +428,19 @@ class StrategyBuilder:
             if df.empty:
                 return False
 
-            # Find nearest strike
+            # Find nearest strike, skipping any already used by this option type
+            df = df.copy()
             df['strike_diff'] = abs(df['strike'] - target_strike)
-            nearest = df.nsmallest(1, 'strike_diff').iloc[0]
+            already_used = used_strikes.get(option_type, set())
+            candidates = df.sort_values('strike_diff')
+            nearest = None
+            for _, row in candidates.iterrows():
+                if float(row['strike']) not in already_used:
+                    nearest = row
+                    break
+            if nearest is None:
+                nearest = candidates.iloc[0]  # fallback: accept duplicate
+            used_strikes.setdefault(option_type, set()).add(float(nearest['strike']))
 
             # Add leg
             self.add_leg(
