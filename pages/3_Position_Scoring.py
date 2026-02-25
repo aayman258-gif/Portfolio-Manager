@@ -71,6 +71,38 @@ with col2:
 
 st.info(f"**{current_regime} Regime:** Weighting quant signals at {regime_weights['quant']*100:.0f}% and fundamentals at {regime_weights['fundamental']*100:.0f}%")
 
+# ── Customizable Weight Sliders ──────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.header("⚙️ Custom Score Weights")
+use_custom_weights = st.sidebar.checkbox("Override regime weights", value=False)
+
+if use_custom_weights:
+    custom_quant_w = st.sidebar.slider("Quant Weight", 0.0, 1.0,
+                                        float(regime_weights['quant']), 0.05)
+    custom_fund_w = round(1.0 - custom_quant_w, 2)
+    st.sidebar.metric("Fundamental Weight", f"{custom_fund_w*100:.0f}%")
+
+    st.sidebar.markdown("**Quant Components:**")
+    momentum_w   = st.sidebar.slider("Momentum",    0.0, 1.0, 0.40, 0.05)
+    volatility_w = st.sidebar.slider("Volatility",  0.0, 1.0, 0.30, 0.05)
+    regime_fit_w = max(0.0, round(1.0 - momentum_w - volatility_w, 2))
+    st.sidebar.metric("Regime Fit Weight", f"{regime_fit_w*100:.0f}%")
+
+    st.sidebar.markdown("**Fundamental Components:**")
+    growth_w    = st.sidebar.slider("Growth",    0.0, 1.0, 0.35, 0.05)
+    quality_w   = st.sidebar.slider("Quality",   0.0, 1.0, 0.35, 0.05)
+    valuation_w = max(0.0, round(1.0 - growth_w - quality_w, 2))
+    st.sidebar.metric("Valuation Weight", f"{valuation_w*100:.0f}%")
+else:
+    custom_quant_w   = regime_weights['quant']
+    custom_fund_w    = regime_weights['fundamental']
+    momentum_w       = 0.40
+    volatility_w     = 0.30
+    regime_fit_w     = 0.30
+    growth_w         = 0.35
+    quality_w        = 0.35
+    valuation_w      = 0.30
+
 # Score all positions
 st.subheader("📋 Position Scores")
 
@@ -90,6 +122,19 @@ with st.spinner("Scoring all positions... This may take a moment."):
 
                 # Calculate unified score
                 score_result = scorer.calculate_unified_score(ticker, prices, current_regime)
+
+                # Apply custom weights if enabled
+                if use_custom_weights:
+                    q = (score_result['momentum_score'] * momentum_w +
+                         score_result['volatility_score'] * volatility_w +
+                         score_result['regime_fit_score'] * regime_fit_w)
+                    f = (score_result['growth_score'] * growth_w +
+                         score_result['quality_score'] * quality_w +
+                         score_result['valuation_score'] * valuation_w)
+                    score_result = dict(score_result)
+                    score_result['quant_score']       = q
+                    score_result['fundamental_score'] = f
+                    score_result['unified_score']     = q * custom_quant_w + f * custom_fund_w
 
                 # Get interpretation
                 rating, color = scorer.get_score_interpretation(score_result['unified_score'])
@@ -317,6 +362,26 @@ if scores_data:
 
         current_ratio = fundamentals.get('current_ratio', None)
         st.write(f"Current Ratio: {current_ratio:.2f}" if current_ratio else "N/A")
+
+    # Fundamental Trends
+    trends = full_data.get('fundamental_trends', {})
+    if trends:
+        st.markdown("### 📈 Fundamental Trends")
+        _icons  = {'up': '↑', 'down': '↓', 'flat': '→'}
+        _colors = {'up': '#00d4aa', 'down': '#FF6B6B', 'flat': '#aaaaaa'}
+        trend_cols = st.columns(max(len(trends), 1))
+        for idx, (metric, direction) in enumerate(trends.items()):
+            icon  = _icons.get(direction, '→')
+            color = _colors.get(direction, '#aaaaaa')
+            label = metric.replace('_', ' ').title()
+            with trend_cols[idx % len(trend_cols)]:
+                st.markdown(
+                    f"<div style='text-align:center; padding:8px;'>"
+                    f"<p style='margin:0; font-size:13px;'>{label}</p>"
+                    f"<p style='margin:0; font-size:28px; color:{color};'>{icon}</p>"
+                    f"</div>",
+                    unsafe_allow_html=True
+                )
 
     # Action recommendation
     st.markdown("### 💡 Recommendation")

@@ -248,6 +248,54 @@ class ScoringEngine:
 
         return np.mean(scores)
 
+    def calculate_fundamental_trends(self, ticker: str) -> dict:
+        """
+        Detect trend direction for key fundamental metrics.
+        Returns dict: metric -> 'up' | 'down' | 'flat'
+        """
+        try:
+            stock = yf.Ticker(ticker)
+            trends = {}
+
+            # Quarterly income statement trends
+            try:
+                income = stock.quarterly_income_stmt
+                if income is not None and not income.empty and income.shape[1] >= 2:
+                    if 'Total Revenue' in income.index:
+                        rev = income.loc['Total Revenue'].dropna()
+                        if len(rev) >= 2:
+                            chg = (rev.iloc[0] - rev.iloc[1]) / abs(rev.iloc[1]) if rev.iloc[1] != 0 else 0
+                            trends['revenue'] = 'up' if chg > 0.02 else 'down' if chg < -0.02 else 'flat'
+                    for ni_key in ['Net Income', 'Net Income Common Stockholders']:
+                        if ni_key in income.index:
+                            ni = income.loc[ni_key].dropna()
+                            if len(ni) >= 2:
+                                chg = (ni.iloc[0] - ni.iloc[1]) / abs(ni.iloc[1]) if ni.iloc[1] != 0 else 0
+                                trends['net_income'] = 'up' if chg > 0.02 else 'down' if chg < -0.02 else 'flat'
+                            break
+            except Exception:
+                pass
+
+            # Info-based trends
+            try:
+                info = stock.info
+                trailing_eps = info.get('trailingEps')
+                forward_eps = info.get('forwardEps')
+                if trailing_eps and forward_eps:
+                    trends['earnings'] = 'up' if forward_eps > trailing_eps * 1.02 else 'down' if forward_eps < trailing_eps * 0.98 else 'flat'
+                rev_growth = info.get('revenueGrowth')
+                if rev_growth is not None:
+                    trends['revenue_growth'] = 'up' if rev_growth > 0.05 else 'down' if rev_growth < -0.02 else 'flat'
+                debt_eq = info.get('debtToEquity')
+                if debt_eq is not None:
+                    trends['debt'] = 'up' if debt_eq < 50 else 'down' if debt_eq > 150 else 'flat'
+            except Exception:
+                pass
+
+            return trends
+        except Exception:
+            return {}
+
     def calculate_unified_score(
         self,
         ticker: str,
@@ -280,6 +328,12 @@ class ScoringEngine:
         weights = self.regime_weights.get(current_regime, {'quant': 0.5, 'fundamental': 0.5})
         unified_score = (quant_score * weights['quant'] + fundamental_score * weights['fundamental'])
 
+        # Fundamental trends
+        try:
+            fundamental_trends = self.calculate_fundamental_trends(ticker)
+        except Exception:
+            fundamental_trends = {}
+
         result = {
             # Quant scores
             'momentum_score': momentum_score,
@@ -302,7 +356,10 @@ class ScoringEngine:
             'fundamental_weight': weights['fundamental'],
 
             # Raw fundamentals for display
-            'fundamentals': fundamentals
+            'fundamentals': fundamentals,
+
+            # Trend directions per metric
+            'fundamental_trends': fundamental_trends
         }
 
         return result

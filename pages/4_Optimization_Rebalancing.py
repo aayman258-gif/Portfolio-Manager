@@ -58,6 +58,23 @@ optimization_method = st.sidebar.selectbox(
     }[x]
 )
 
+st.sidebar.divider()
+st.sidebar.header("💰 Rebalancing Controls")
+
+min_trade_threshold = st.sidebar.slider(
+    "Min Trade Size (% of portfolio)",
+    min_value=0.5, max_value=10.0, value=2.0, step=0.5,
+    help="Ignore rebalancing trades smaller than this % of portfolio value"
+)
+
+transaction_cost_bps = st.sidebar.number_input(
+    "Transaction Cost (bps per trade)",
+    min_value=0, max_value=100, value=10,
+    help="Basis points charged per trade (10 bps = 0.10%)"
+)
+
+st.sidebar.caption(f"Trades < {min_trade_threshold:.1f}% of portfolio filtered out.")
+
 # Get current regime
 @st.cache_data
 def get_current_regime():
@@ -259,39 +276,68 @@ if 'optimization_result' in st.session_state:
     )
 
     if not trades_df.empty:
-        st.markdown(f"**Execute {len(trades_df)} trades to reach optimal allocation:**")
+        # Apply minimum trade size filter
+        min_trade_value = total_value * (min_trade_threshold / 100)
+        trades_filtered = trades_df[trades_df['Value'] >= min_trade_value].copy()
+        trades_below = trades_df[trades_df['Value'] < min_trade_value]
 
-        # Color code actions
-        def color_trade_action(val):
-            if val in ['BUY', 'INCREASE']:
-                return 'background-color: lightgreen'
-            else:
-                return 'background-color: #FFB3B3'
+        # Cost/benefit analysis
+        total_trade_val = trades_filtered['Value'].sum() if not trades_filtered.empty else 0
+        cost_per_trade  = transaction_cost_bps / 10000
+        total_tx_cost   = total_trade_val * cost_per_trade
+        net_benefit_ann = (result['expected_return'] / 100 * total_value) - total_tx_cost
 
-        styled_trades = trades_df.style.format({
-            'Shares': '{:.2f}',
-            'Price': '${:.2f}',
-            'Value': '${:,.2f}',
-            'Current Weight': '{:.2f}%',
-            'Target Weight': '{:.2f}%',
-            'Weight Change': '{:+.2f}%'
-        }).applymap(color_trade_action, subset=['Action'])
+        if not trades_filtered.empty:
+            st.markdown(
+                f"**Execute {len(trades_filtered)} trades to reach optimal allocation**"
+                + (f" ({len(trades_below)} below threshold filtered out)" if not trades_below.empty else "") + ":"
+            )
+        else:
+            st.success("✅ No trades exceed the minimum threshold. Portfolio effectively at target.")
 
-        st.dataframe(styled_trades, use_container_width=True, hide_index=True)
+        if not trades_below.empty:
+            st.caption(
+                f"Filtered: {', '.join(trades_below['Ticker'].tolist())} "
+                f"(< ${min_trade_value:,.0f} each)"
+            )
 
-        # Total trade value
-        total_trade_value = trades_df['Value'].sum()
-        st.info(f"**Total Trade Value:** ${total_trade_value:,.2f} ({total_trade_value/total_value*100:.1f}% of portfolio)")
+        # Cost/benefit summary row
+        col_cb1, col_cb2, col_cb3 = st.columns(3)
+        with col_cb1:
+            st.metric("Total Trade Value", f"${total_trade_val:,.0f}")
+        with col_cb2:
+            st.metric("Est. Transaction Costs", f"${total_tx_cost:,.0f}",
+                      help=f"{transaction_cost_bps} bps × trade value")
+        with col_cb3:
+            st.metric("Net Annual Benefit", f"${net_benefit_ann:,.0f}",
+                      delta=f"{net_benefit_ann/total_value*100:.2f}% of portfolio",
+                      help="Expected return improvement minus transaction costs")
 
-        # Export trades
-        csv_trades = trades_df.to_csv(index=False)
+        if not trades_filtered.empty:
+            def color_trade_action(val):
+                if val in ['BUY', 'INCREASE']:
+                    return 'background-color: lightgreen'
+                else:
+                    return 'background-color: #FFB3B3'
 
-        st.download_button(
-            label="📥 Download Rebalancing Trades (CSV)",
-            data=csv_trades,
-            file_name=f"rebalancing_trades_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
-            mime="text/csv"
-        )
+            styled_trades = trades_filtered.style.format({
+                'Shares': '{:.2f}',
+                'Price': '${:.2f}',
+                'Value': '${:,.2f}',
+                'Current Weight': '{:.2f}%',
+                'Target Weight': '{:.2f}%',
+                'Weight Change': '{:+.2f}%'
+            }).applymap(color_trade_action, subset=['Action'])
+
+            st.dataframe(styled_trades, use_container_width=True, hide_index=True)
+
+            csv_trades = trades_filtered.to_csv(index=False)
+            st.download_button(
+                label="📥 Download Rebalancing Trades (CSV)",
+                data=csv_trades,
+                file_name=f"rebalancing_trades_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
+                mime="text/csv"
+            )
 
     else:
         st.success("✅ Portfolio is already optimally allocated! No trades needed.")
@@ -309,6 +355,78 @@ if 'optimization_result' in st.session_state:
 
     This allocation is optimized for {optimization_method.replace('_', ' ')} in the current market regime.
     """)
+
+    # Correlation Matrix & Diversification Score
+    st.subheader("🔗 Correlation Matrix & Diversification")
+
+    with st.spinner("Calculating 60-day correlations..."):
+        try:
+            _corr_tickers = positions_df['ticker'].tolist()
+            prices_corr = optimizer.fetch_price_data(_corr_tickers, period='3mo')
+            if not prices_corr.empty and prices_corr.shape[1] > 1:
+                rets_corr  = prices_corr.pct_change().dropna()
+                corr_mtx   = rets_corr.corr()
+                n          = len(corr_mtx)
+
+                # Average absolute off-diagonal correlation → diversification score
+                off_diag = [
+                    abs(corr_mtx.iloc[i, j])
+                    for i in range(n) for j in range(i + 1, n)
+                ]
+                avg_corr          = sum(off_diag) / len(off_diag) if off_diag else 0
+                diversif_score    = (1 - avg_corr) * 100
+
+                # High-correlation pairs (≥0.85)
+                high_corr_pairs = [
+                    (corr_mtx.index[i], corr_mtx.columns[j], corr_mtx.iloc[i, j])
+                    for i in range(n) for j in range(i + 1, n)
+                    if abs(corr_mtx.iloc[i, j]) >= 0.85
+                ]
+
+                col_div, col_heat = st.columns([1, 3])
+
+                with col_div:
+                    score_color = "#00d4aa" if diversif_score >= 60 else "#FFB366" if diversif_score >= 40 else "#FF6B6B"
+                    label_text  = "Good" if diversif_score >= 60 else "Moderate" if diversif_score >= 40 else "Poor"
+                    st.markdown(
+                        f"<div style='text-align:center; padding:20px;'>"
+                        f"<p style='margin:0; font-size:13px; color:#aaa;'>Diversification Score</p>"
+                        f"<p style='margin:0; font-size:52px; font-weight:bold; color:{score_color};'>{diversif_score:.0f}</p>"
+                        f"<p style='margin:0; font-size:13px; color:{score_color};'>{label_text}</p>"
+                        f"</div>",
+                        unsafe_allow_html=True
+                    )
+                    st.caption(f"Avg pairwise correlation: {avg_corr:.2f}")
+                    if high_corr_pairs:
+                        st.markdown("**Highly correlated (≥0.85):**")
+                        for t1, t2, val in high_corr_pairs:
+                            st.warning(f"{t1} ↔ {t2}: {val:.2f}")
+                    else:
+                        st.success("No pairs ≥ 0.85 correlation")
+
+                with col_heat:
+                    fig_corr = go.Figure(data=go.Heatmap(
+                        z=corr_mtx.values,
+                        x=corr_mtx.columns.tolist(),
+                        y=corr_mtx.index.tolist(),
+                        colorscale='RdBu_r',
+                        zmid=0, zmin=-1, zmax=1,
+                        text=corr_mtx.round(2).values,
+                        texttemplate='%{text}',
+                        textfont=dict(size=11),
+                        showscale=True,
+                        colorbar=dict(title='Corr')
+                    ))
+                    fig_corr.update_layout(
+                        title="60-Day Return Correlations",
+                        height=400,
+                        template='plotly_dark'
+                    )
+                    st.plotly_chart(fig_corr, use_container_width=True)
+            else:
+                st.info("Need at least 2 tickers for correlation analysis.")
+        except Exception as e:
+            st.warning(f"Could not calculate correlations: {e}")
 
     # Risk warning
     st.warning("""

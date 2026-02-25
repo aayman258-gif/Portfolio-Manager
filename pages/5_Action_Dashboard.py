@@ -11,6 +11,7 @@ from plotly.subplots import make_subplots
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
+import yfinance as yf
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
@@ -256,18 +257,124 @@ actions_df = pd.DataFrame(actions)
 if not actions_df.empty:
     actions_df = actions_df.sort_values('score', ascending=False)
 
-# Display actions
+# Display actions with expandable drill-down
+_priority_icons = {'HIGH': '🔴', 'MEDIUM': '🟡', 'LOW': '🔵', 'NONE': '🟢'}
+
 for _, action in actions_df.iterrows():
     priority = action['priority']
+    icon = _priority_icons.get(priority, '⚪')
 
-    if priority == 'HIGH':
-        st.error(f"**{action['type']}:** {action['action']}")
-    elif priority == 'MEDIUM':
-        st.warning(f"**{action['type']}:** {action['action']}")
-    elif priority == 'LOW':
-        st.info(f"**{action['type']}:** {action['action']}")
-    else:
-        st.success(f"**{action['type']}:** {action['action']}")
+    with st.expander(
+        f"{icon} **{action['type']}** — {priority} Priority",
+        expanded=(priority == 'HIGH')
+    ):
+        st.markdown(f"**Action:** {action['action']}")
+
+        atype = action['type']
+
+        if 'Underperformer' in atype or 'Strong Position' in atype:
+            words = action['action'].split()
+            ticker_hit = words[2] if len(words) > 2 else None
+            if ticker_hit and position_scores:
+                matched = [p for p in position_scores if p['ticker'] == ticker_hit]
+                if matched:
+                    unified = matched[0].get('score', 0)
+                    rating = ("Strong Sell" if unified < 35 else "Sell" if unified < 50
+                              else "Hold" if unified < 65 else "Buy" if unified < 80 else "Strong Buy")
+                    c1, c2 = st.columns(2)
+                    with c1:
+                        st.metric("Unified Score", f"{unified:.1f}/100")
+                    with c2:
+                        st.metric("Rating", rating)
+            st.markdown("*Visit Position Scoring for full sub-score breakdown →*")
+
+        elif 'Reduce Exposure' in atype:
+            st.markdown(f"- Regime **{current_regime}** recommends max {max_equity*100:.0f}% equity")
+            st.markdown("- Trim lowest-scoring positions first")
+            st.markdown("- Or scale all positions down proportionally")
+            st.markdown("*Run Optimization for specific trade recommendations →*")
+
+        elif 'Diversification' in atype:
+            top_t = summary['largest_position_ticker']
+            top_w = summary['largest_position_weight']
+            trim_amt = (top_w - 30) / 100 * summary['total_value']
+            st.markdown(f"- **{top_t}** at {top_w:.1f}% exceeds 30% limit")
+            st.markdown(f"- Trim ~${trim_amt:,.0f} to reach 30%")
+            st.markdown("- Redeploy into other holdings or hold as cash")
+
+        elif 'High Volatility' in atype:
+            vix_now = market_stats['vix_current']
+            level = "Extreme fear" if vix_now > 40 else "High fear"
+            st.markdown(f"- VIX **{vix_now:.1f}** — {level} (normal range: 15-20)")
+            st.markdown("- Increase cash, reduce speculative positions")
+            st.markdown("- Consider protective puts on largest holdings")
+
+        elif 'Near Highs' in atype:
+            dist = market_stats['distance_from_high']
+            st.markdown(f"- SPY is **{dist:+.1f}%** from its 52-week high")
+            st.markdown("- Consider trailing stops on profitable positions")
+            st.markdown("- Watch for momentum reversal / distribution signals")
+
+        elif 'All Clear' in atype:
+            st.markdown(f"- Regime: **{current_regime}** — no immediate concerns")
+            st.markdown("- Review position scores weekly to catch regime changes early")
+            st.markdown("- Next scheduled review: in 7 days")
+
+# === SECTION 3.5: EARNINGS CALENDAR ===
+st.subheader("📅 Upcoming Earnings (Next 30 Days)")
+
+with st.spinner("Checking earnings calendar..."):
+    earnings_data = []
+    today_date = datetime.now().date()
+    cutoff_date = today_date + timedelta(days=30)
+
+    for ticker in tickers:
+        try:
+            stock = yf.Ticker(ticker)
+            cal = stock.calendar
+            earnings_date = None
+
+            if isinstance(cal, dict):
+                ed = cal.get('Earnings Date')
+                if ed:
+                    earnings_date = ed[0] if isinstance(ed, (list, tuple)) and len(ed) > 0 else ed
+            elif isinstance(cal, pd.DataFrame) and not cal.empty:
+                if 'Earnings Date' in cal.index:
+                    earnings_date = cal.loc['Earnings Date'].iloc[0]
+
+            if earnings_date is not None:
+                if hasattr(earnings_date, 'date'):
+                    earnings_date = earnings_date.date()
+                elif isinstance(earnings_date, str):
+                    try:
+                        earnings_date = datetime.strptime(earnings_date[:10], '%Y-%m-%d').date()
+                    except Exception:
+                        earnings_date = None
+
+                if earnings_date and today_date <= earnings_date <= cutoff_date:
+                    days_until = (earnings_date - today_date).days
+                    try:
+                        avg_move = abs(yf.Ticker(ticker).info.get('beta', 1.0)) * 3.5
+                    except Exception:
+                        avg_move = None
+                    earnings_data.append({
+                        'Ticker': ticker,
+                        'Earnings Date': earnings_date.strftime('%Y-%m-%d'),
+                        'Days Until': days_until,
+                        'Est. Avg Move': f"±{avg_move:.1f}%" if avg_move else 'N/A',
+                        'Urgency': '🔴 This week' if days_until <= 7 else '🟡 2 weeks' if days_until <= 14 else '🔵 This month'
+                    })
+        except Exception:
+            pass
+
+if earnings_data:
+    earnings_df = pd.DataFrame(earnings_data).sort_values('Days Until')
+    st.dataframe(earnings_df, use_container_width=True, hide_index=True)
+    imminent = [e['Ticker'] for e in earnings_data if e['Days Until'] <= 7]
+    if imminent:
+        st.warning(f"⚠️ Earnings this week: **{', '.join(imminent)}** — review positions before the report.")
+else:
+    st.success("✅ No earnings in the next 30 days for your holdings.")
 
 # === SECTION 4: TOP 3 POSITIONS ===
 st.subheader("🏆 Top Positions by Value")

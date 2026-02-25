@@ -17,6 +17,9 @@ sys.path.append(str(Path(__file__).parent))
 from data.portfolio_loader import PortfolioLoader
 from calculations.performance import PerformanceAnalytics
 from utils.theme import apply_dark_theme, dark_plotly_layout
+from utils.portfolio_store import (
+    save_portfolio, load_portfolio, portfolio_file_exists, get_last_saved_time
+)
 
 # Distinct color palette for holdings
 _HOLDING_COLORS = [
@@ -136,6 +139,30 @@ elif input_method == "Upload CSV":
         except Exception as e:
             st.sidebar.error(f"Error: {str(e)}")
 
+# ── Portfolio Persistence ────────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.header("💾 Portfolio Persistence")
+
+if portfolio_file_exists():
+    last_saved = get_last_saved_time()
+    if last_saved:
+        try:
+            saved_dt = datetime.fromisoformat(last_saved)
+            st.sidebar.caption(f"Last saved: {saved_dt.strftime('%Y-%m-%d %H:%M')}")
+        except Exception:
+            pass
+    if st.sidebar.button("📂 Load Saved Portfolio"):
+        loaded = load_portfolio()
+        if loaded is not None:
+            st.session_state['positions'] = loaded
+            st.session_state['manual_positions'] = loaded.to_dict(orient='records')
+            st.sidebar.success(f"Loaded {len(loaded)} positions!")
+            st.rerun()
+        else:
+            st.sidebar.error("Could not load saved portfolio.")
+else:
+    st.sidebar.caption("No saved portfolio found.")
+
 # Check if we have positions (either from current load or session state)
 if 'positions' in st.session_state:
     positions_df = st.session_state['positions']
@@ -152,6 +179,15 @@ if positions_df is not None and not positions_df.empty:
 
     # Get portfolio summary
     summary = loader.get_portfolio_summary(position_metrics)
+
+    # Save button
+    _save_col1, _save_col2 = st.columns([5, 1])
+    with _save_col2:
+        if st.button("💾 Save Portfolio"):
+            if save_portfolio(positions_df):
+                st.success("Saved!")
+            else:
+                st.error("Save failed.")
 
     # Display Portfolio Summary
     st.subheader("📊 Portfolio Overview")
@@ -267,11 +303,26 @@ if positions_df is not None and not positions_df.empty:
     # Performance Analytics
     st.subheader("📈 Performance Analytics")
 
+    # Benchmark selector (outside spinner so it persists)
+    benchmark_ticker = st.selectbox(
+        "Compare against benchmark:",
+        options=['SPY', 'QQQ', 'DIA', 'IWM', 'None'],
+        index=0,
+        key='benchmark_select'
+    )
+
     # Fetch historical data
     with st.spinner("Calculating performance metrics..."):
         # Get historical data for past year
         start_date = datetime.now() - timedelta(days=365)
         historical_data = loader.fetch_historical_data(tickers, start_date=start_date)
+
+        # Fetch benchmark data
+        benchmark_data = None
+        if benchmark_ticker != 'None':
+            bench_hist = loader.fetch_historical_data([benchmark_ticker], start_date=start_date)
+            if bench_hist.get(benchmark_ticker) is not None and not bench_hist[benchmark_ticker].empty:
+                benchmark_data = bench_hist[benchmark_ticker]['Close']
 
         # Calculate weights based on current allocation
         weights = {}
@@ -286,28 +337,43 @@ if positions_df is not None and not positions_df.empty:
             # Calculate metrics
             metrics = analytics.calculate_all_metrics(portfolio_returns)
 
-            # Display metrics
-            col1, col2, col3 = st.columns(3)
+    # Tabs for performance, P&L history, risk
+    tab_perf, tab_history, tab_risk = st.tabs(["📈 Performance", "📊 P&L History", "⚠️ Risk & Stress"])
 
+    with tab_perf:
+        if not portfolio_returns.empty and len(portfolio_returns) > 20:
+            # Core metrics
+            col1, col2, col3 = st.columns(3)
             with col1:
                 st.metric("Annualized Return", f"{metrics['cagr']:.2f}%")
                 st.metric("Total Return", f"{metrics['total_return']:.2f}%")
-
             with col2:
                 st.metric("Volatility (Annual)", f"{metrics['volatility']:.2f}%")
                 st.metric("Sharpe Ratio", f"{metrics['sharpe_ratio']:.2f}")
-
             with col3:
                 st.metric("Max Drawdown", f"{metrics['max_drawdown']:.2f}%")
                 st.metric("Win Rate", f"{metrics['win_rate']:.1f}%")
 
+            # Alpha / Beta vs benchmark
+            if benchmark_data is not None and not benchmark_data.empty:
+                bench_returns_aligned = benchmark_data.pct_change().dropna()
+                common_idx = portfolio_returns.index.intersection(bench_returns_aligned.index)
+                if len(common_idx) > 20:
+                    p_ret = portfolio_returns.loc[common_idx]
+                    b_ret = bench_returns_aligned.loc[common_idx]
+                    beta_val   = p_ret.cov(b_ret) / b_ret.var() if b_ret.var() > 0 else 0
+                    alpha_ann  = (p_ret.mean() - beta_val * b_ret.mean()) * 252 * 100
+                    col_a, col_b = st.columns(2)
+                    with col_a:
+                        st.metric(f"Beta vs {benchmark_ticker}", f"{beta_val:.2f}")
+                    with col_b:
+                        st.metric(f"Alpha vs {benchmark_ticker} (Ann.)", f"{alpha_ann:+.2f}%")
+
             # Cumulative returns chart
             st.subheader("📊 Cumulative Returns")
-
             cumulative_returns = (1 + portfolio_returns).cumprod()
 
             fig_cum = go.Figure()
-
             fig_cum.add_trace(go.Scatter(
                 x=cumulative_returns.index,
                 y=(cumulative_returns - 1) * 100,
@@ -317,17 +383,26 @@ if positions_df is not None and not positions_df.empty:
                 fillcolor='rgba(0,204,0,0.1)'
             ))
 
+            # Benchmark overlay
+            if benchmark_data is not None and not benchmark_data.empty:
+                bench_rets = benchmark_data.pct_change().dropna()
+                bench_cum  = (1 + bench_rets).cumprod()
+                fig_cum.add_trace(go.Scatter(
+                    x=bench_cum.index,
+                    y=(bench_cum - 1) * 100,
+                    name=benchmark_ticker,
+                    line=dict(color='#FFD700', width=1.5, dash='dash'),
+                ))
+
             fig_cum.update_layout(
-                title="Portfolio Cumulative Return",
+                title="Portfolio vs Benchmark Cumulative Return",
                 xaxis_title="Date",
                 yaxis_title="Cumulative Return (%)",
                 height=400,
                 hovermode='x unified',
                 **dark_plotly_layout()
             )
-
             fig_cum.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
-
             st.plotly_chart(fig_cum, use_container_width=True)
 
             # Drawdown chart
@@ -335,7 +410,6 @@ if positions_df is not None and not positions_df.empty:
             drawdown = (cumulative_returns - running_max) / running_max * 100
 
             fig_dd = go.Figure()
-
             fig_dd.add_trace(go.Scatter(
                 x=drawdown.index,
                 y=drawdown,
@@ -344,7 +418,6 @@ if positions_df is not None and not positions_df.empty:
                 fill='tozeroy',
                 fillcolor='rgba(255,107,107,0.2)'
             ))
-
             fig_dd.update_layout(
                 title="Portfolio Drawdown",
                 xaxis_title="Date",
@@ -352,11 +425,76 @@ if positions_df is not None and not positions_df.empty:
                 height=300,
                 **dark_plotly_layout()
             )
-
             st.plotly_chart(fig_dd, use_container_width=True)
-
         else:
-            st.warning("Insufficient historical data for performance analytics. Need at least 20 days of data.")
+            st.warning("Insufficient historical data. Need at least 20 days.")
+
+    with tab_history:
+        st.markdown("#### Position P&L History")
+        lookback_days = st.slider("Lookback (days)", min_value=30, max_value=365, value=180, step=30,
+                                   key='pnl_history_lookback')
+        hist_start = datetime.now() - timedelta(days=lookback_days)
+        with st.spinner("Loading position histories..."):
+            hist_data_pos = loader.fetch_historical_data(tickers, start_date=hist_start)
+        fig_hist = go.Figure()
+        for i, ticker in enumerate(tickers):
+            if hist_data_pos.get(ticker) is not None and not hist_data_pos[ticker].empty:
+                prices_h   = hist_data_pos[ticker]['Close']
+                pos_row    = positions_df[positions_df['ticker'] == ticker].iloc[0]
+                shares_h   = float(pos_row['shares'])
+                cost_h     = float(pos_row['cost_basis'])
+                pnl_series = prices_h * shares_h - cost_h * shares_h
+                color      = _HOLDING_COLORS[i % len(_HOLDING_COLORS)]
+                fig_hist.add_trace(go.Scatter(
+                    x=prices_h.index, y=pnl_series,
+                    name=ticker,
+                    line=dict(color=color, width=1.5),
+                ))
+        fig_hist.add_hline(y=0, line_dash="dash", line_color="gray", opacity=0.5)
+        fig_hist.update_layout(
+            title="Position Unrealized P&L Over Time ($)",
+            xaxis_title="Date",
+            yaxis_title="Unrealized P&L ($)",
+            height=450,
+            hovermode='x unified',
+            **dark_plotly_layout()
+        )
+        st.plotly_chart(fig_hist, use_container_width=True)
+
+    with tab_risk:
+        st.markdown("#### Value at Risk (VaR)")
+        if not portfolio_returns.empty and len(portfolio_returns) > 20:
+            port_val      = summary['total_value']
+            daily_vol     = portfolio_returns.std()
+            var_95_param  = 1.645 * daily_vol * port_val
+            var_99_param  = 2.326 * daily_vol * port_val
+            var_95_hist   = abs(portfolio_returns.quantile(0.05)) * port_val
+            var_99_hist   = abs(portfolio_returns.quantile(0.01)) * port_val
+
+            col_v1, col_v2, col_v3, col_v4 = st.columns(4)
+            with col_v1:
+                st.metric("VaR 95% (Param)", f"${var_95_param:,.0f}", help="1-day 95% parametric VaR")
+            with col_v2:
+                st.metric("VaR 99% (Param)", f"${var_99_param:,.0f}", help="1-day 99% parametric VaR")
+            with col_v3:
+                st.metric("VaR 95% (Hist)", f"${var_95_hist:,.0f}", help="1-day 95% historical VaR")
+            with col_v4:
+                st.metric("VaR 99% (Hist)", f"${var_99_hist:,.0f}", help="1-day 99% historical VaR")
+
+            st.markdown("#### Stress Test Scenarios")
+            stress_rows = []
+            for spct in [-10, -20, -30, -40]:
+                impact    = port_val * (spct / 100)
+                new_val   = port_val + impact
+                stress_rows.append({
+                    'SPY Move':              f"{spct:+.0f}%",
+                    'Est. Portfolio Impact': f"${impact:,.0f}",
+                    'Est. Portfolio Value':  f"${new_val:,.0f}",
+                    'Impact %':              f"{spct:+.0f}%",
+                })
+            st.dataframe(pd.DataFrame(stress_rows), use_container_width=True, hide_index=True)
+        else:
+            st.warning("Insufficient data for risk calculations.")
 
     # Export
     st.subheader("💾 Export Data")
