@@ -10,15 +10,18 @@ from plotly.subplots import make_subplots
 import sys
 from pathlib import Path
 from datetime import datetime, timedelta
+import yfinance as yf
 
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent))
 
 from data.portfolio_loader import PortfolioLoader
 from calculations.performance import PerformanceAnalytics
+from calculations.options_analytics import OptionsAnalytics
 from utils.theme import apply_dark_theme, dark_plotly_layout
 from utils.portfolio_store import (
-    save_portfolio, load_portfolio, portfolio_file_exists, get_last_saved_time
+    save_portfolio, load_portfolio, portfolio_file_exists, get_last_saved_time,
+    save_options_positions, load_options_positions,
 )
 
 # Distinct color palette for holdings
@@ -163,6 +166,128 @@ if portfolio_file_exists():
 else:
     st.sidebar.caption("No saved portfolio found.")
 
+# ── Options Positions Input ──────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.header("📊 Add Options Position")
+
+# Initialise options state once per session
+if 'options_positions' not in st.session_state:
+    st.session_state['options_positions'] = []
+if '_opts_loaded' not in st.session_state:
+    _saved_opts = load_options_positions()
+    if _saved_opts:
+        st.session_state['options_positions'] = _saved_opts
+    st.session_state['_opts_loaded'] = True
+
+# ── Step 1: Ticker ───────────────────────────────────────────────────────────
+_add_ul = st.sidebar.text_input(
+    "Underlying Ticker", key="_add_opt_ul", placeholder="e.g. AAPL"
+).upper().strip()
+
+if st.sidebar.button("🔍 Fetch Options Chain", key="_fetch_chain_btn"):
+    if _add_ul:
+        try:
+            _s = yf.Ticker(_add_ul)
+            _exps = list(_s.options)
+            if _exps:
+                st.session_state['_opt_exps']      = _exps
+                st.session_state['_opt_ul_loaded'] = _add_ul
+                # Clear downstream state on new ticker fetch
+                for _k in ['_opt_chain', '_opt_sel_exp', '_opt_sel_type']:
+                    st.session_state.pop(_k, None)
+            else:
+                st.sidebar.error(f"No options found for {_add_ul}")
+        except Exception as _e:
+            st.sidebar.error(f"Error fetching chain: {_e}")
+    else:
+        st.sidebar.warning("Enter a ticker first.")
+
+# ── Step 2: Expiry + Type + Load Strikes ────────────────────────────────────
+if st.session_state.get('_opt_exps'):
+    _sel_exp  = st.sidebar.selectbox(
+        "Expiration Date", st.session_state['_opt_exps'], key="_sel_opt_exp"
+    )
+    _sel_type = st.sidebar.radio(
+        "Option Type", ["call", "put"], horizontal=True, key="_sel_opt_type"
+    )
+
+    if st.sidebar.button("📋 Load Strikes", key="_load_strikes_btn"):
+        try:
+            _s2    = yf.Ticker(st.session_state['_opt_ul_loaded'])
+            _chain = _s2.option_chain(_sel_exp)
+            _df    = _chain.calls if _sel_type == 'call' else _chain.puts
+            if not _df.empty:
+                st.session_state['_opt_chain']    = _df.reset_index(drop=True).to_dict(orient='records')
+                st.session_state['_opt_sel_exp']  = _sel_exp
+                st.session_state['_opt_sel_type'] = _sel_type
+            else:
+                st.sidebar.error("No contracts found for this expiry/type.")
+        except Exception as _e:
+            st.sidebar.error(f"Error loading strikes: {_e}")
+
+# ── Step 3: Strike selector + Entry form ────────────────────────────────────
+if st.session_state.get('_opt_chain'):
+    _chain_df = pd.DataFrame(st.session_state['_opt_chain'])
+
+    def _strike_label(i):
+        r   = _chain_df.iloc[i]
+        bid = float(r.get('bid', 0) or 0)
+        ask = float(r.get('ask', 0) or 0)
+        mid = (bid + ask) / 2 if bid > 0 and ask > 0 else float(r.get('lastPrice', 0) or 0)
+        iv  = float(r.get('impliedVolatility', 0) or 0) * 100
+        oi  = int(r.get('openInterest', 0) or 0)
+        return f"${r['strike']:.2f}  mid ${mid:.2f}  IV {iv:.0f}%  OI {oi:,}"
+
+    _sel_idx = st.sidebar.selectbox(
+        "Strike", range(len(_chain_df)),
+        format_func=_strike_label, key="_sel_strike_idx"
+    )
+    _sel_row  = _chain_df.iloc[_sel_idx]
+    _bid      = float(_sel_row.get('bid', 0) or 0)
+    _ask      = float(_sel_row.get('ask', 0) or 0)
+    _last     = float(_sel_row.get('lastPrice', 0) or 0)
+    _mid      = (_bid + _ask) / 2 if _bid > 0 and _ask > 0 else _last
+    _iv       = float(_sel_row.get('impliedVolatility', 0.3) or 0.3)
+    _oi       = int(_sel_row.get('openInterest', 0) or 0)
+    _vol      = int(_sel_row.get('volume', 0) or 0)
+
+    st.sidebar.info(
+        f"**Market:** Mid ${_mid:.2f}  |  IV {_iv*100:.0f}%  |  "
+        f"OI {_oi:,}  |  Vol {_vol:,}"
+    )
+
+    with st.sidebar.form("add_option_form", clear_on_submit=True):
+        _contracts  = st.number_input("Contracts", min_value=1, value=1, step=1)
+        _cost_basis = st.number_input(
+            "Your Cost Basis ($/share)",
+            min_value=0.0, value=round(_mid, 2), step=0.01,
+            help="Price YOU paid per share. Each contract = 100 shares."
+        )
+        _submitted = st.form_submit_button("➕ Add Options Position")
+
+        if _submitted:
+            st.session_state['options_positions'].append({
+                'underlying':  st.session_state['_opt_ul_loaded'],
+                'option_type': st.session_state['_opt_sel_type'],
+                'strike':      float(_sel_row['strike']),
+                'expiration':  st.session_state['_opt_sel_exp'],
+                'contracts':   int(_contracts),
+                'cost_basis':  float(_cost_basis),
+                'iv_at_entry': _iv,
+                'status':      'open',
+                'close_method': None,
+                'close_price':  None,
+                'close_date':   None,
+            })
+            save_options_positions(st.session_state['options_positions'])
+            st.rerun()
+
+    if st.sidebar.button("🔄 New Search", key="_reset_chain_btn"):
+        for _k in ['_opt_exps', '_opt_ul_loaded', '_opt_chain',
+                   '_opt_sel_exp', '_opt_sel_type']:
+            st.session_state.pop(_k, None)
+        st.rerun()
+
 # Check if we have positions (either from current load or session state)
 if 'positions' in st.session_state:
     positions_df = st.session_state['positions']
@@ -299,6 +424,240 @@ if positions_df is not None and not positions_df.empty:
         fig_bar.add_hline(y=0, line_dash="dash", line_color="gray")
 
         st.plotly_chart(fig_bar, use_container_width=True)
+
+    # ── OPTIONS POSITIONS ────────────────────────────────────────────────────
+    st.subheader("📊 Options Positions")
+
+    _opts = st.session_state.get('options_positions', [])
+    _oa   = OptionsAnalytics()
+
+    if _opts:
+        # Batch-fetch underlying prices for all open positions
+        _open_uls = list({p['underlying'] for p in _opts if p['status'] == 'open'})
+        _ul_prices: dict = {}
+        if _open_uls:
+            _ul_prices = loader.fetch_current_prices(_open_uls)
+
+        # Mark-to-market: fetch live option price + IV per open position
+        with st.spinner("Fetching live options prices…"):
+            for _p in _opts:
+                if _p['status'] != 'open':
+                    continue
+                try:
+                    _stk   = yf.Ticker(_p['underlying'])
+                    _chn   = _stk.option_chain(_p['expiration'])
+                    _cdf   = _chn.calls if _p['option_type'] == 'call' else _chn.puts
+                    _cdf   = _cdf.copy()
+                    _cdf['_diff'] = abs(_cdf['strike'] - _p['strike'])
+                    _crow  = _cdf.nsmallest(1, '_diff').iloc[0]
+                    _cbid  = float(_crow.get('bid', 0) or 0)
+                    _cask  = float(_crow.get('ask', 0) or 0)
+                    _clast = float(_crow.get('lastPrice', 0) or 0)
+                    _cmid  = (_cbid + _cask) / 2 if _cbid > 0 and _cask > 0 else _clast
+                    _civ   = float(_crow.get('impliedVolatility', _p.get('iv_at_entry', 0.3)) or 0.3)
+                    _p['_live_price'] = _cmid if _cmid > 0 else None
+                    _p['_live_iv']    = _civ
+                except Exception:
+                    _p['_live_price'] = None
+                    _p['_live_iv']    = _p.get('iv_at_entry', 0.3)
+
+        # Build display rows + running totals
+        _opt_rows      = []
+        _total_opt_val = 0.0
+        _total_opt_pnl = 0.0
+        _open_count    = 0
+        _closed_count  = 0
+
+        for _idx, _p in enumerate(_opts):
+            _exp_dt   = datetime.strptime(_p['expiration'], '%Y-%m-%d')
+            _dte      = (_exp_dt - datetime.now()).days
+            _cost_tot = _p['cost_basis'] * _p['contracts'] * 100
+
+            if _p['status'] == 'closed':
+                _cm = _p.get('close_method', '')
+                if _cm == 'expired_worthless':
+                    _cur_price = 0.0
+                    _pnl       = -_cost_tot
+                elif _cm in ('sold', 'exercised'):
+                    _cur_price = float(_p.get('close_price') or 0)
+                    _pnl       = _cur_price * _p['contracts'] * 100 - _cost_tot
+                else:
+                    _cur_price = 0.0
+                    _pnl       = -_cost_tot
+                _pnl_pct  = (_pnl / _cost_tot * 100) if _cost_tot else 0
+                _delta = _theta = _gamma = _vega = None
+                _iv_disp = _p.get('iv_at_entry', 0.3)
+                _closed_count += 1
+            else:
+                _cur_price = _p.get('_live_price')
+                _iv_disp   = _p.get('_live_iv', _p.get('iv_at_entry', 0.3))
+                if _cur_price is not None:
+                    _cur_val = _cur_price * _p['contracts'] * 100
+                    _pnl     = _cur_val - _cost_tot
+                    _pnl_pct = (_pnl / _cost_tot * 100) if _cost_tot else 0
+                    _total_opt_val += _cur_val
+                    _total_opt_pnl += _pnl
+                else:
+                    _cur_val = _pnl = _pnl_pct = None
+
+                # Greeks
+                _ul_p = _ul_prices.get(_p['underlying'], 0)
+                _T    = max(_dte / 365, 0.001)
+                if _ul_p > 0 and _T > 0:
+                    try:
+                        _g     = _oa.calculate_greeks(
+                            S=_ul_p, K=_p['strike'], T=_T,
+                            sigma=_iv_disp, option_type=_p['option_type'], r=0.045
+                        )
+                        _delta = _g.get('delta')
+                        _theta = _g.get('theta')
+                        _gamma = _g.get('gamma')
+                        _vega  = _g.get('vega')
+                    except Exception:
+                        _delta = _theta = _gamma = _vega = None
+                else:
+                    _delta = _theta = _gamma = _vega = None
+                _open_count += 1
+
+            _opt_rows.append({
+                '_idx':       _idx,
+                'Underlying': _p['underlying'],
+                'Type':       _p['option_type'].upper(),
+                'Strike':     f"${_p['strike']:.2f}",
+                'Expiry':     _p['expiration'],
+                'DTE':        str(_dte) if _p['status'] == 'open' else '—',
+                'Contracts':  _p['contracts'],
+                'Cost/sh':    f"${_p['cost_basis']:.2f}",
+                'Current':    f"${_cur_price:.2f}" if _cur_price is not None else 'N/A',
+                'P&L $':      f"${_pnl:,.2f}" if _pnl is not None else 'N/A',
+                'P&L %':      f"{_pnl_pct:+.1f}%" if _pnl_pct is not None else 'N/A',
+                'Delta':      f"{_delta:.3f}" if _delta is not None else '—',
+                'Theta':      f"{_theta:.3f}" if _theta is not None else '—',
+                'IV':         f"{_iv_disp*100:.1f}%" if _iv_disp else '—',
+                'Status':     '✅ Open' if _p['status'] == 'open'
+                              else f"⭕ {(_p.get('close_method') or 'closed').replace('_',' ').title()}",
+            })
+
+        # Options summary metrics
+        _ocol1, _ocol2, _ocol3, _ocol4 = st.columns(4)
+        with _ocol1:
+            st.metric("Open Positions Value", f"${_total_opt_val:,.2f}")
+        with _ocol2:
+            st.metric("Unrealised P&L (Open)", f"${_total_opt_pnl:,.2f}")
+        with _ocol3:
+            st.metric("Open Contracts", _open_count)
+        with _ocol4:
+            st.metric("Closed Positions", _closed_count)
+
+        # Options table
+        _disp_df = pd.DataFrame([{k: v for k, v in r.items() if k != '_idx'} for r in _opt_rows])
+        st.dataframe(_disp_df, use_container_width=True, hide_index=True)
+
+        # Per-position close / remove controls
+        st.markdown("#### Manage Positions")
+        for _row in _opt_rows:
+            _idx = _row['_idx']
+            _p   = _opts[_idx]
+            _lbl = f"{_p['option_type'].upper()} {_p['underlying']} ${_p['strike']:.0f} exp {_p['expiration']}"
+
+            if _p['status'] == 'open':
+                with st.expander(f"✅ {_lbl} — Mark as Closed"):
+                    _close_m = st.selectbox(
+                        "How was this position closed?",
+                        options=['sold', 'expired_worthless', 'exercised'],
+                        format_func=lambda x: {
+                            'sold':              'Sold at market / limit price',
+                            'expired_worthless': 'Expired worthless (0 value)',
+                            'exercised':         'Exercised at strike price',
+                        }[x],
+                        key=f"close_m_{_idx}"
+                    )
+                    _close_price = None
+                    if _close_m == 'sold':
+                        _close_price = st.number_input(
+                            "Sale price received ($/share)",
+                            min_value=0.0, step=0.01, key=f"close_px_{_idx}"
+                        )
+                    elif _close_m == 'exercised':
+                        _ul_p2 = _ul_prices.get(_p['underlying'], 0)
+                        _intr  = max(_ul_p2 - _p['strike'], 0) if _p['option_type'] == 'call' \
+                                 else max(_p['strike'] - _ul_p2, 0)
+                        st.info(f"Current intrinsic value: ${_intr:.2f}/share")
+                        _close_price = st.number_input(
+                            "Net value at exercise ($/share)",
+                            min_value=0.0, value=round(_intr, 2), step=0.01,
+                            key=f"exer_px_{_idx}"
+                        )
+                    if st.button("Confirm Close", key=f"confirm_cls_{_idx}"):
+                        st.session_state['options_positions'][_idx].update({
+                            'status':       'closed',
+                            'close_method': _close_m,
+                            'close_price':  _close_price,
+                            'close_date':   datetime.now().strftime('%Y-%m-%d'),
+                        })
+                        save_options_positions(st.session_state['options_positions'])
+                        st.rerun()
+            else:
+                _pnl_raw = None
+                _cst = _p['cost_basis'] * _p['contracts'] * 100
+                _cm2 = _p.get('close_method', '')
+                if _cm2 == 'expired_worthless':
+                    _pnl_raw = -_cst
+                elif _cm2 in ('sold', 'exercised') and _p.get('close_price') is not None:
+                    _pnl_raw = float(_p['close_price']) * _p['contracts'] * 100 - _cst
+
+                _pnl_str = f"P&L ${_pnl_raw:,.2f}" if _pnl_raw is not None else ""
+                with st.expander(f"⭕ {_lbl} — {(_cm2 or 'closed').replace('_',' ').title()} {_pnl_str}"):
+                    st.markdown(f"**Method:** {(_cm2 or '—').replace('_',' ').title()}")
+                    if _p.get('close_price') is not None:
+                        st.markdown(f"**Close price:** ${float(_p['close_price']):.2f}/share")
+                    if _p.get('close_date'):
+                        st.markdown(f"**Date:** {_p['close_date']}")
+                    if _pnl_raw is not None:
+                        _clr = '#00d4aa' if _pnl_raw >= 0 else '#FF6B6B'
+                        st.markdown(
+                            f"**Realised P&L:** <span style='color:{_clr};font-weight:bold;'>"
+                            f"${_pnl_raw:,.2f}</span>",
+                            unsafe_allow_html=True
+                        )
+                    if st.button("🗑️ Remove", key=f"rm_opt_{_idx}"):
+                        st.session_state['options_positions'].pop(_idx)
+                        save_options_positions(st.session_state['options_positions'])
+                        st.rerun()
+
+        if _closed_count > 0:
+            if st.button("🗑️ Clear All Closed Positions"):
+                st.session_state['options_positions'] = [
+                    p for p in _opts if p['status'] == 'open'
+                ]
+                save_options_positions(st.session_state['options_positions'])
+                st.rerun()
+
+    else:
+        st.info("No options positions yet. Use the **📊 Add Options Position** section in the sidebar to add one.")
+
+    # ── COMBINED PORTFOLIO TOTALS ────────────────────────────────────────────
+    if _opts:
+        st.subheader("🎯 Combined Portfolio")
+        _stk_val = summary['total_value']
+        _stk_pnl = summary['total_pnl']
+        _comb_val = _stk_val + _total_opt_val
+        _comb_pnl = _stk_pnl + _total_opt_pnl
+
+        _c1, _c2, _c3 = st.columns(3)
+        with _c1:
+            st.markdown("**📈 Stock Portfolio**")
+            st.metric("Value",   f"${_stk_val:,.2f}")
+            st.metric("P&L",     f"${_stk_pnl:,.2f}",
+                      f"{summary['total_pnl_pct']:+.2f}%")
+        with _c2:
+            st.markdown("**📊 Options Portfolio**")
+            st.metric("Value (Open)",      f"${_total_opt_val:,.2f}")
+            st.metric("Unrealised P&L",    f"${_total_opt_pnl:,.2f}")
+        with _c3:
+            st.markdown("**🎯 Combined**")
+            st.metric("Total Value",   f"${_comb_val:,.2f}")
+            st.metric("Total P&L",     f"${_comb_pnl:,.2f}")
 
     # Correlation Matrix & Diversification Score
     st.subheader("🔗 Correlation & Diversification")
