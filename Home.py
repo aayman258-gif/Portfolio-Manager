@@ -300,6 +300,86 @@ if positions_df is not None and not positions_df.empty:
 
         st.plotly_chart(fig_bar, use_container_width=True)
 
+    # Correlation Matrix & Diversification Score
+    st.subheader("🔗 Correlation & Diversification")
+
+    if len(tickers) >= 2:
+        with st.spinner("Calculating 60-day correlations..."):
+            try:
+                import yfinance as yf
+                corr_start = datetime.now() - timedelta(days=90)
+                raw_corr = loader.fetch_historical_data(tickers, start_date=corr_start)
+                prices_corr = pd.DataFrame({
+                    t: raw_corr[t]['Close']
+                    for t in tickers
+                    if raw_corr.get(t) is not None and not raw_corr[t].empty
+                })
+
+                if prices_corr.shape[1] >= 2:
+                    rets_corr = prices_corr.pct_change().dropna()
+                    corr_mtx  = rets_corr.corr()
+                    n         = len(corr_mtx)
+
+                    off_diag = [
+                        abs(corr_mtx.iloc[i, j])
+                        for i in range(n) for j in range(i + 1, n)
+                    ]
+                    avg_corr       = sum(off_diag) / len(off_diag) if off_diag else 0
+                    diversif_score = (1 - avg_corr) * 100
+                    score_color    = "#00d4aa" if diversif_score >= 60 else "#FFB366" if diversif_score >= 40 else "#FF6B6B"
+                    score_label    = "Good" if diversif_score >= 60 else "Moderate" if diversif_score >= 40 else "Poor"
+
+                    high_corr_pairs = [
+                        (corr_mtx.index[i], corr_mtx.columns[j], corr_mtx.iloc[i, j])
+                        for i in range(n) for j in range(i + 1, n)
+                        if abs(corr_mtx.iloc[i, j]) >= 0.85
+                    ]
+
+                    col_div, col_heat = st.columns([1, 3])
+
+                    with col_div:
+                        st.markdown(
+                            f"<div style='text-align:center; padding:20px;'>"
+                            f"<p style='margin:0; font-size:13px; color:#aaa;'>Diversification Score</p>"
+                            f"<p style='margin:0; font-size:56px; font-weight:bold; color:{score_color};'>{diversif_score:.0f}</p>"
+                            f"<p style='margin:0; font-size:13px; color:{score_color};'>{score_label}</p>"
+                            f"</div>",
+                            unsafe_allow_html=True
+                        )
+                        st.caption(f"Avg pairwise correlation: {avg_corr:.2f}")
+                        if high_corr_pairs:
+                            st.markdown("**Highly correlated pairs (≥0.85):**")
+                            for t1, t2, val in high_corr_pairs:
+                                st.warning(f"{t1} ↔ {t2}: {val:.2f}", icon="⚠️")
+                        else:
+                            st.success("No pairs with correlation ≥ 0.85", icon="✅")
+
+                    with col_heat:
+                        fig_corr = go.Figure(data=go.Heatmap(
+                            z=corr_mtx.values,
+                            x=corr_mtx.columns.tolist(),
+                            y=corr_mtx.index.tolist(),
+                            colorscale='RdBu_r',
+                            zmid=0, zmin=-1, zmax=1,
+                            text=corr_mtx.round(2).values,
+                            texttemplate='%{text}',
+                            textfont=dict(size=11),
+                            showscale=True,
+                            colorbar=dict(title='Corr')
+                        ))
+                        fig_corr.update_layout(
+                            title="60-Day Return Correlations",
+                            height=380,
+                            **dark_plotly_layout()
+                        )
+                        st.plotly_chart(fig_corr, use_container_width=True)
+                else:
+                    st.info("Could not fetch sufficient data for correlation analysis.")
+            except Exception as e:
+                st.warning(f"Correlation calculation failed: {e}")
+    else:
+        st.info("Add at least 2 positions to see correlation analysis.")
+
     # Performance Analytics
     st.subheader("📈 Performance Analytics")
 
