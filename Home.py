@@ -24,6 +24,105 @@ from utils.portfolio_store import (
     save_options_positions, load_options_positions,
 )
 
+# ── Multi-leg strategy templates ─────────────────────────────────────────────
+_STRAT_TEMPLATES = {
+    'Iron Condor': {
+        'desc': 'Sell OTM put spread + OTM call spread (net credit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'put',  'position': 'short', 'offset': -0.05, 'label': 'Short OTM Put'},
+            {'option_type': 'put',  'position': 'long',  'offset': -0.10, 'label': 'Long Far-OTM Put'},
+            {'option_type': 'call', 'position': 'short', 'offset':  0.05, 'label': 'Short OTM Call'},
+            {'option_type': 'call', 'position': 'long',  'offset':  0.10, 'label': 'Long Far-OTM Call'},
+        ],
+    },
+    'Bull Call Spread': {
+        'desc': 'Buy ATM call, sell OTM call (net debit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'call', 'position': 'long',  'offset': 0.00, 'label': 'Long ATM Call'},
+            {'option_type': 'call', 'position': 'short', 'offset': 0.05, 'label': 'Short OTM Call'},
+        ],
+    },
+    'Bear Call Spread': {
+        'desc': 'Sell OTM call, buy further OTM call (net credit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'call', 'position': 'short', 'offset': 0.05, 'label': 'Short OTM Call'},
+            {'option_type': 'call', 'position': 'long',  'offset': 0.10, 'label': 'Long Far-OTM Call'},
+        ],
+    },
+    'Bull Put Spread': {
+        'desc': 'Sell OTM put, buy further OTM put (net credit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'put', 'position': 'short', 'offset': -0.05, 'label': 'Short OTM Put'},
+            {'option_type': 'put', 'position': 'long',  'offset': -0.10, 'label': 'Long Far-OTM Put'},
+        ],
+    },
+    'Bear Put Spread': {
+        'desc': 'Buy ATM put, sell OTM put (net debit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'put', 'position': 'long',  'offset':  0.00, 'label': 'Long ATM Put'},
+            {'option_type': 'put', 'position': 'short', 'offset': -0.05, 'label': 'Short OTM Put'},
+        ],
+    },
+    'Long Straddle': {
+        'desc': 'Buy ATM call + put — profits from big move (net debit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'call', 'position': 'long', 'offset': 0.00, 'label': 'Long ATM Call'},
+            {'option_type': 'put',  'position': 'long', 'offset': 0.00, 'label': 'Long ATM Put'},
+        ],
+    },
+    'Short Straddle': {
+        'desc': 'Sell ATM call + put — profits from no move (net credit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'call', 'position': 'short', 'offset': 0.00, 'label': 'Short ATM Call'},
+            {'option_type': 'put',  'position': 'short', 'offset': 0.00, 'label': 'Short ATM Put'},
+        ],
+    },
+    'Long Strangle': {
+        'desc': 'Buy OTM call + put — cheaper than straddle (net debit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'call', 'position': 'long', 'offset':  0.05, 'label': 'Long OTM Call'},
+            {'option_type': 'put',  'position': 'long', 'offset': -0.05, 'label': 'Long OTM Put'},
+        ],
+    },
+    'Short Strangle': {
+        'desc': 'Sell OTM call + put (net credit)',
+        'calendar': False,
+        'legs': [
+            {'option_type': 'call', 'position': 'short', 'offset':  0.05, 'label': 'Short OTM Call'},
+            {'option_type': 'put',  'position': 'short', 'offset': -0.05, 'label': 'Short OTM Put'},
+        ],
+    },
+    'Calendar Call Spread': {
+        'desc': 'Sell near-term call, buy same-strike far-term call (net debit)',
+        'calendar': True,
+        'legs': [
+            {'option_type': 'call', 'position': 'short', 'offset': 0.00, 'label': 'Short Near-Term Call', 'far': False},
+            {'option_type': 'call', 'position': 'long',  'offset': 0.00, 'label': 'Long Far-Term Call',   'far': True},
+        ],
+    },
+    'Calendar Put Spread': {
+        'desc': 'Sell near-term put, buy same-strike far-term put (net debit)',
+        'calendar': True,
+        'legs': [
+            {'option_type': 'put', 'position': 'short', 'offset': 0.00, 'label': 'Short Near-Term Put', 'far': False},
+            {'option_type': 'put', 'position': 'long',  'offset': 0.00, 'label': 'Long Far-Term Put',   'far': True},
+        ],
+    },
+    'Custom': {
+        'desc': 'Build your own multi-leg strategy leg by leg',
+        'calendar': False,
+        'legs': [],
+    },
+}
+
 # Distinct color palette for holdings
 _HOLDING_COLORS = [
     '#00d4aa', '#7B68EE', '#FF8C00', '#45B7D1', '#DDA0DD',
@@ -431,96 +530,365 @@ if positions_df is not None and not positions_df.empty:
     _opts = st.session_state.get('options_positions', [])
     _oa   = OptionsAnalytics()
 
-    if _opts:
-        # Batch-fetch underlying prices for all open positions
-        _open_uls = list({p['underlying'] for p in _opts if p['status'] == 'open'})
-        _ul_prices: dict = {}
-        if _open_uls:
-            _ul_prices = loader.fetch_current_prices(_open_uls)
+    # ── Helper: live price lookup for one contract ────────────────────────────
+    def _live_option(underlying, option_type, strike, expiration, iv_fallback=0.3):
+        try:
+            _s  = yf.Ticker(underlying)
+            _c  = _s.option_chain(expiration)
+            _df = _c.calls if option_type == 'call' else _c.puts
+            _df = _df.copy()
+            _df['_d'] = abs(_df['strike'] - strike)
+            _r  = _df.nsmallest(1, '_d').iloc[0]
+            _b  = float(_r.get('bid', 0) or 0)
+            _a  = float(_r.get('ask', 0) or 0)
+            _l  = float(_r.get('lastPrice', 0) or 0)
+            _m  = (_b + _a) / 2 if _b > 0 and _a > 0 else _l
+            _iv = float(_r.get('impliedVolatility', iv_fallback) or iv_fallback)
+            return (_m if _m > 0 else None), _iv
+        except Exception:
+            return None, iv_fallback
 
-        # Mark-to-market: fetch live option price + IV per open position
-        with st.spinner("Fetching live options prices…"):
-            for _p in _opts:
-                if _p['status'] != 'open':
-                    continue
-                try:
-                    _stk   = yf.Ticker(_p['underlying'])
-                    _chn   = _stk.option_chain(_p['expiration'])
-                    _cdf   = _chn.calls if _p['option_type'] == 'call' else _chn.puts
-                    _cdf   = _cdf.copy()
-                    _cdf['_diff'] = abs(_cdf['strike'] - _p['strike'])
-                    _crow  = _cdf.nsmallest(1, '_diff').iloc[0]
-                    _cbid  = float(_crow.get('bid', 0) or 0)
-                    _cask  = float(_crow.get('ask', 0) or 0)
-                    _clast = float(_crow.get('lastPrice', 0) or 0)
-                    _cmid  = (_cbid + _cask) / 2 if _cbid > 0 and _cask > 0 else _clast
-                    _civ   = float(_crow.get('impliedVolatility', _p.get('iv_at_entry', 0.3)) or 0.3)
-                    _p['_live_price'] = _cmid if _cmid > 0 else None
-                    _p['_live_iv']    = _civ
-                except Exception:
-                    _p['_live_price'] = None
-                    _p['_live_iv']    = _p.get('iv_at_entry', 0.3)
+    # Separate single-leg vs strategy positions
+    _singles    = [(i, p) for i, p in enumerate(_opts) if p.get('type', 'single') == 'single']
+    _strategies = [(i, p) for i, p in enumerate(_opts) if p.get('type') == 'strategy']
 
-        # Build display rows + running totals
-        _opt_rows      = []
-        _total_opt_val = 0.0
-        _total_opt_pnl = 0.0
-        _open_count    = 0
-        _closed_count  = 0
+    # Collect all open underlying tickers
+    _open_uls = set()
+    for _, _p in _singles:
+        if _p['status'] == 'open':
+            _open_uls.add(_p['underlying'])
+    for _, _p in _strategies:
+        if _p['status'] == 'open':
+            _open_uls.add(_p['underlying'])
+    _ul_prices: dict = loader.fetch_current_prices(list(_open_uls)) if _open_uls else {}
 
-        for _idx, _p in enumerate(_opts):
+    _total_opt_val = 0.0
+    _total_opt_pnl = 0.0
+
+    # ── Strategy Builder toggle ───────────────────────────────────────────────
+    if '_sb_show' not in st.session_state:
+        st.session_state['_sb_show'] = False
+
+    _hcol1, _hcol2 = st.columns([4, 1])
+    with _hcol2:
+        if st.button(
+            "✖ Close Builder" if st.session_state['_sb_show'] else "🔀 Add Strategy",
+            key="_strat_toggle"
+        ):
+            st.session_state['_sb_show'] = not st.session_state['_sb_show']
+            if not st.session_state['_sb_show']:
+                for _k in ['_sb_exps','_sb_ul_loaded','_sb_near_chain','_sb_far_chain',
+                           '_sb_calls_chain','_sb_puts_chain','_sb_single_exp_loaded',
+                           '_sb_near_exp_loaded','_sb_far_exp_loaded','_sb_custom_legs']:
+                    st.session_state.pop(_k, None)
+            st.rerun()
+
+    # ── Strategy Builder UI ───────────────────────────────────────────────────
+    if st.session_state['_sb_show']:
+        with st.container(border=True):
+            st.markdown("#### 🔧 Multi-Leg Strategy Builder")
+
+            _sb_c1, _sb_c2, _sb_c3 = st.columns([2, 2, 1])
+            with _sb_c1:
+                _sb_tmpl = st.selectbox(
+                    "Strategy Template", list(_STRAT_TEMPLATES.keys()), key="_sb_tmpl_sel"
+                )
+                st.caption(_STRAT_TEMPLATES[_sb_tmpl]['desc'])
+            with _sb_c2:
+                _sb_ul = st.text_input(
+                    "Underlying Ticker", key="_sb_ul_in", placeholder="e.g. SPY"
+                ).upper().strip()
+            with _sb_c3:
+                st.markdown("<br>", unsafe_allow_html=True)
+                if st.button("🔍 Fetch Chain", key="_sb_fetch"):
+                    if _sb_ul:
+                        try:
+                            _exps = list(yf.Ticker(_sb_ul).options)
+                            if _exps:
+                                st.session_state['_sb_exps']      = _exps
+                                st.session_state['_sb_ul_loaded'] = _sb_ul
+                                for _k in ['_sb_near_chain','_sb_far_chain',
+                                           '_sb_calls_chain','_sb_puts_chain']:
+                                    st.session_state.pop(_k, None)
+                            else:
+                                st.error(f"No options for {_sb_ul}")
+                        except Exception as _e:
+                            st.error(str(_e))
+
+            _ti   = _STRAT_TEMPLATES[_sb_tmpl]
+            _is_cal = _ti['calendar']
+
+            if st.session_state.get('_sb_exps'):
+                _exps = st.session_state['_sb_exps']
+                st.markdown("---")
+
+                # Expiry selection
+                if _is_cal:
+                    _ec1, _ec2, _ec3 = st.columns([2, 2, 1])
+                    with _ec1:
+                        _sb_near = st.selectbox(
+                            "Near Expiry (short leg)", _exps, index=0, key="_sb_near_exp"
+                        )
+                    with _ec2:
+                        _far_def = min(3, len(_exps) - 1)
+                        _sb_far  = st.selectbox(
+                            "Far Expiry (long leg)", _exps, index=_far_def, key="_sb_far_exp"
+                        )
+                    with _ec3:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("📋 Load Chains", key="_sb_load_cal"):
+                            try:
+                                _ul2     = st.session_state['_sb_ul_loaded']
+                                _ot      = _ti['legs'][0]['option_type']
+                                _stk_obj = yf.Ticker(_ul2)
+                                _nc      = _stk_obj.option_chain(_sb_near)
+                                _fc      = _stk_obj.option_chain(_sb_far)
+                                _nd      = _nc.calls if _ot == 'call' else _nc.puts
+                                _fd      = _fc.calls if _ot == 'call' else _fc.puts
+                                st.session_state['_sb_near_chain']       = _nd.reset_index(drop=True).to_dict(orient='records')
+                                st.session_state['_sb_far_chain']        = _fd.reset_index(drop=True).to_dict(orient='records')
+                                st.session_state['_sb_near_exp_loaded']  = _sb_near
+                                st.session_state['_sb_far_exp_loaded']   = _sb_far
+                            except Exception as _e:
+                                st.error(str(_e))
+                else:
+                    _ec1, _ec2 = st.columns([3, 1])
+                    with _ec1:
+                        _sb_single_exp = st.selectbox(
+                            "Expiration (all legs)", _exps,
+                            index=min(2, len(_exps) - 1), key="_sb_single_exp"
+                        )
+                    with _ec2:
+                        st.markdown("<br>", unsafe_allow_html=True)
+                        if st.button("📋 Load Strikes", key="_sb_load_std"):
+                            try:
+                                _full = yf.Ticker(st.session_state['_sb_ul_loaded']).option_chain(_sb_single_exp)
+                                st.session_state['_sb_calls_chain']       = _full.calls.reset_index(drop=True).to_dict(orient='records')
+                                st.session_state['_sb_puts_chain']        = _full.puts.reset_index(drop=True).to_dict(orient='records')
+                                st.session_state['_sb_single_exp_loaded'] = _sb_single_exp
+                            except Exception as _e:
+                                st.error(str(_e))
+
+                # Check if chains are ready
+                _chains_ready = (
+                    (st.session_state.get('_sb_near_chain') and st.session_state.get('_sb_far_chain'))
+                    if _is_cal else
+                    bool(st.session_state.get('_sb_calls_chain'))
+                )
+
+                # Custom leg management
+                if _sb_tmpl == 'Custom' and _chains_ready:
+                    if '_sb_custom_legs' not in st.session_state:
+                        st.session_state['_sb_custom_legs'] = []
+                    if st.button("+ Add Leg", key="_sb_add_cl"):
+                        st.session_state['_sb_custom_legs'].append({})
+                        st.rerun()
+
+                if _chains_ready:
+                    st.markdown("---")
+                    st.markdown("**Configure legs** — strike · contracts · your cost basis:")
+
+                    _ul_px   = _ul_prices.get(st.session_state.get('_sb_ul_loaded', ''), 0)
+                    _leg_cfg = []
+                    _tmpl_legs = _ti['legs'] if _sb_tmpl != 'Custom' else \
+                                 [{'option_type': 'call', 'position': 'long', 'offset': 0.0,
+                                   'label': f'Leg {i+1}', 'far': False}
+                                  for i in range(len(st.session_state.get('_sb_custom_legs', [])))]
+
+                    for _li, _lt in enumerate(_tmpl_legs):
+                        _ot2   = _lt['option_type']
+                        _pos2  = _lt['position'] if _sb_tmpl != 'Custom' else \
+                                 st.session_state.get(f'_sb_cl_pos_{_li}', 'long')
+                        _lbl2  = _lt['label']
+                        _is_far_leg = _lt.get('far', False)
+
+                        # Pick the right chain
+                        if _is_cal:
+                            _cr = st.session_state['_sb_far_chain'] if _is_far_leg \
+                                  else st.session_state['_sb_near_chain']
+                            _exp_leg = st.session_state['_sb_far_exp_loaded'] if _is_far_leg \
+                                       else st.session_state['_sb_near_exp_loaded']
+                        else:
+                            _cr = st.session_state.get('_sb_calls_chain' if _ot2 == 'call'
+                                                        else '_sb_puts_chain', [])
+                            _exp_leg = st.session_state.get('_sb_single_exp_loaded', '')
+
+                        _cdf2 = pd.DataFrame(_cr)
+                        if _cdf2.empty:
+                            continue
+
+                        _icon  = '▲' if _pos2 == 'long' else '▼'
+                        _iclr  = '#00d4aa' if _pos2 == 'long' else '#FF6B6B'
+                        st.markdown(
+                            f"<small><span style='color:{_iclr};font-weight:bold;'>"
+                            f"{_icon} {_pos2.upper()} {_ot2.upper()}</span> — "
+                            f"{_lbl2}  |  exp {_exp_leg}</small>",
+                            unsafe_allow_html=True
+                        )
+
+                        # Suggest nearest strike to offset
+                        _target = _ul_px * (1 + _lt.get('offset', 0.0))
+                        _cdf2   = _cdf2.copy()
+                        _cdf2['_d2'] = abs(_cdf2['strike'] - _target)
+                        _def_idx = int(_cdf2['_d2'].idxmin())
+
+                        def _slbl(i, df=_cdf2):
+                            r  = df.iloc[i]
+                            b  = float(r.get('bid', 0) or 0)
+                            a  = float(r.get('ask', 0) or 0)
+                            m  = (b + a) / 2 if b > 0 and a > 0 else float(r.get('lastPrice', 0) or 0)
+                            iv = float(r.get('impliedVolatility', 0) or 0) * 100
+                            return f"${r['strike']:.2f}  mid ${m:.2f}  IV {iv:.0f}%"
+
+                        _lc1, _lc2, _lc3 = st.columns([3, 1, 1])
+                        with _lc1:
+                            _sel_si = st.selectbox(
+                                "Strike", range(len(_cdf2)), index=_def_idx,
+                                format_func=_slbl, key=f"_sb_str_{_li}",
+                                label_visibility='collapsed'
+                            )
+                        _sel_sr = _cdf2.iloc[_sel_si]
+                        _sb2    = float(_sel_sr.get('bid', 0) or 0)
+                        _sa2    = float(_sel_sr.get('ask', 0) or 0)
+                        _sm2    = (_sb2 + _sa2) / 2 if _sb2 > 0 and _sa2 > 0 \
+                                  else float(_sel_sr.get('lastPrice', 0) or 0)
+                        _siv2   = float(_sel_sr.get('impliedVolatility', 0.3) or 0.3)
+
+                        with _lc2:
+                            _leg_contracts = st.number_input(
+                                "Qty", min_value=1, value=1, step=1,
+                                key=f"_sb_qty_{_li}", label_visibility='collapsed'
+                            )
+                        with _lc3:
+                            _leg_cost = st.number_input(
+                                "Cost/sh", min_value=0.0, value=round(_sm2, 2), step=0.01,
+                                key=f"_sb_cost_{_li}", label_visibility='collapsed'
+                            )
+
+                        # Custom: also let user pick option type + position
+                        if _sb_tmpl == 'Custom':
+                            _cc1, _cc2 = st.columns(2)
+                            with _cc1:
+                                _ot2 = st.selectbox(
+                                    "Type", ['call', 'put'],
+                                    key=f"_sb_cl_type_{_li}", label_visibility='collapsed'
+                                )
+                            with _cc2:
+                                _pos2 = st.selectbox(
+                                    "Position", ['long', 'short'],
+                                    key=f"_sb_cl_pos_{_li}", label_visibility='collapsed'
+                                )
+                            if st.button(f"🗑️ Remove leg {_li+1}", key=f"_sb_rm_cl_{_li}"):
+                                st.session_state['_sb_custom_legs'].pop(_li)
+                                st.rerun()
+
+                        _leg_cfg.append({
+                            'option_type': _ot2,
+                            'position':    _pos2,
+                            'strike':      float(_sel_sr['strike']),
+                            'expiration':  _exp_leg,
+                            'contracts':   int(st.session_state.get(f"_sb_qty_{_li}", 1)),
+                            'cost_basis':  float(st.session_state.get(f"_sb_cost_{_li}", _sm2)),
+                            'iv_at_entry': _siv2,
+                            'label':       _lbl2,
+                        })
+
+                    # Net debit/credit preview
+                    if _leg_cfg:
+                        _net = sum(
+                            l['cost_basis'] * l['contracts'] * 100 *
+                            (1 if l['position'] == 'long' else -1)
+                            for l in _leg_cfg
+                        )
+                        _net_lbl = f"Net Credit received: ${abs(_net):,.2f}" \
+                                   if _net < 0 else f"Net Debit paid: ${_net:,.2f}"
+                        st.info(f"📊 {_net_lbl}")
+
+                    # Name + submit
+                    _auto_nm = f"{_sb_tmpl} — {st.session_state.get('_sb_ul_loaded','')}"
+                    _strat_nm = st.text_input("Strategy Name", value=_auto_nm, key="_sb_name")
+
+                    _sc1, _sc2 = st.columns(2)
+                    with _sc1:
+                        if st.button("➕ Add Strategy", key="_sb_submit", type="primary"):
+                            if _leg_cfg:
+                                st.session_state['options_positions'].append({
+                                    'type':         'strategy',
+                                    'name':         _strat_nm,
+                                    'underlying':   st.session_state.get('_sb_ul_loaded', ''),
+                                    'status':       'open',
+                                    'close_method': None,
+                                    'close_price':  None,
+                                    'close_date':   None,
+                                    'legs':         _leg_cfg,
+                                })
+                                save_options_positions(st.session_state['options_positions'])
+                                for _k in ['_sb_exps','_sb_ul_loaded','_sb_near_chain',
+                                           '_sb_far_chain','_sb_calls_chain','_sb_puts_chain',
+                                           '_sb_single_exp_loaded','_sb_near_exp_loaded',
+                                           '_sb_far_exp_loaded','_sb_custom_legs']:
+                                    st.session_state.pop(_k, None)
+                                st.session_state['_sb_show'] = False
+                                st.rerun()
+                    with _sc2:
+                        if st.button("Cancel", key="_sb_cancel"):
+                            st.session_state['_sb_show'] = False
+                            st.rerun()
+
+    # ── Single-leg positions table ────────────────────────────────────────────
+    if _singles:
+        st.markdown("#### Single-Leg Positions")
+        with st.spinner("Fetching live prices for single-leg positions…"):
+            for _, _p in _singles:
+                if _p['status'] == 'open':
+                    _lp, _liv = _live_option(
+                        _p['underlying'], _p['option_type'],
+                        _p['strike'], _p['expiration'], _p.get('iv_at_entry', 0.3)
+                    )
+                    _p['_live_price'] = _lp
+                    _p['_live_iv']    = _liv
+
+        _sl_rows     = []
+        _sl_open_cnt = 0
+        _sl_cls_cnt  = 0
+        for _sidx, _p in _singles:
             _exp_dt   = datetime.strptime(_p['expiration'], '%Y-%m-%d')
             _dte      = (_exp_dt - datetime.now()).days
             _cost_tot = _p['cost_basis'] * _p['contracts'] * 100
-
             if _p['status'] == 'closed':
                 _cm = _p.get('close_method', '')
-                if _cm == 'expired_worthless':
-                    _cur_price = 0.0
-                    _pnl       = -_cost_tot
-                elif _cm in ('sold', 'exercised'):
-                    _cur_price = float(_p.get('close_price') or 0)
-                    _pnl       = _cur_price * _p['contracts'] * 100 - _cost_tot
-                else:
-                    _cur_price = 0.0
-                    _pnl       = -_cost_tot
-                _pnl_pct  = (_pnl / _cost_tot * 100) if _cost_tot else 0
-                _delta = _theta = _gamma = _vega = None
-                _iv_disp = _p.get('iv_at_entry', 0.3)
-                _closed_count += 1
+                _cp = float(_p.get('close_price') or 0)
+                _pnl = (-_cost_tot if _cm == 'expired_worthless'
+                        else _cp * _p['contracts'] * 100 - _cost_tot)
+                _pnl_pct = (_pnl / _cost_tot * 100) if _cost_tot else 0
+                _delta = _theta = None
+                _iv_d  = _p.get('iv_at_entry', 0.3)
+                _sl_cls_cnt += 1
             else:
-                _cur_price = _p.get('_live_price')
-                _iv_disp   = _p.get('_live_iv', _p.get('iv_at_entry', 0.3))
-                if _cur_price is not None:
-                    _cur_val = _cur_price * _p['contracts'] * 100
-                    _pnl     = _cur_val - _cost_tot
+                _cp    = _p.get('_live_price')
+                _iv_d  = _p.get('_live_iv', _p.get('iv_at_entry', 0.3))
+                if _cp is not None:
+                    _pnl     = _cp * _p['contracts'] * 100 - _cost_tot
                     _pnl_pct = (_pnl / _cost_tot * 100) if _cost_tot else 0
-                    _total_opt_val += _cur_val
+                    _total_opt_val += _cp * _p['contracts'] * 100
                     _total_opt_pnl += _pnl
                 else:
-                    _cur_val = _pnl = _pnl_pct = None
-
-                # Greeks
-                _ul_p = _ul_prices.get(_p['underlying'], 0)
-                _T    = max(_dte / 365, 0.001)
-                if _ul_p > 0 and _T > 0:
+                    _pnl = _pnl_pct = None
+                _ul_p2 = _ul_prices.get(_p['underlying'], 0)
+                _T2    = max(_dte / 365, 0.001)
+                _delta = _theta = None
+                if _ul_p2 > 0:
                     try:
-                        _g     = _oa.calculate_greeks(
-                            S=_ul_p, K=_p['strike'], T=_T,
-                            sigma=_iv_disp, option_type=_p['option_type'], r=0.045
-                        )
-                        _delta = _g.get('delta')
-                        _theta = _g.get('theta')
-                        _gamma = _g.get('gamma')
-                        _vega  = _g.get('vega')
+                        _g2    = _oa.calculate_greeks(S=_ul_p2, K=_p['strike'], T=_T2,
+                                                       sigma=_iv_d, option_type=_p['option_type'], r=0.045)
+                        _delta = _g2.get('delta')
+                        _theta = _g2.get('theta')
                     except Exception:
-                        _delta = _theta = _gamma = _vega = None
-                else:
-                    _delta = _theta = _gamma = _vega = None
-                _open_count += 1
+                        pass
+                _sl_open_cnt += 1
 
-            _opt_rows.append({
-                '_idx':       _idx,
+            _sl_rows.append({
+                '_idx':       _sidx,
                 'Underlying': _p['underlying'],
                 'Type':       _p['option_type'].upper(),
                 'Strike':     f"${_p['strike']:.2f}",
@@ -528,136 +896,261 @@ if positions_df is not None and not positions_df.empty:
                 'DTE':        str(_dte) if _p['status'] == 'open' else '—',
                 'Contracts':  _p['contracts'],
                 'Cost/sh':    f"${_p['cost_basis']:.2f}",
-                'Current':    f"${_cur_price:.2f}" if _cur_price is not None else 'N/A',
+                'Current':    f"${_cp:.2f}" if _cp is not None else 'N/A',
                 'P&L $':      f"${_pnl:,.2f}" if _pnl is not None else 'N/A',
                 'P&L %':      f"{_pnl_pct:+.1f}%" if _pnl_pct is not None else 'N/A',
                 'Delta':      f"{_delta:.3f}" if _delta is not None else '—',
                 'Theta':      f"{_theta:.3f}" if _theta is not None else '—',
-                'IV':         f"{_iv_disp*100:.1f}%" if _iv_disp else '—',
+                'IV':         f"{_iv_d*100:.1f}%" if _iv_d else '—',
                 'Status':     '✅ Open' if _p['status'] == 'open'
                               else f"⭕ {(_p.get('close_method') or 'closed').replace('_',' ').title()}",
             })
 
-        # Options summary metrics
-        _ocol1, _ocol2, _ocol3, _ocol4 = st.columns(4)
-        with _ocol1:
-            st.metric("Open Positions Value", f"${_total_opt_val:,.2f}")
-        with _ocol2:
-            st.metric("Unrealised P&L (Open)", f"${_total_opt_pnl:,.2f}")
-        with _ocol3:
-            st.metric("Open Contracts", _open_count)
-        with _ocol4:
-            st.metric("Closed Positions", _closed_count)
+        st.dataframe(
+            pd.DataFrame([{k: v for k, v in r.items() if k != '_idx'} for r in _sl_rows]),
+            use_container_width=True, hide_index=True
+        )
 
-        # Options table
-        _disp_df = pd.DataFrame([{k: v for k, v in r.items() if k != '_idx'} for r in _opt_rows])
-        st.dataframe(_disp_df, use_container_width=True, hide_index=True)
-
-        # Per-position close / remove controls
-        st.markdown("#### Manage Positions")
-        for _row in _opt_rows:
-            _idx = _row['_idx']
-            _p   = _opts[_idx]
-            _lbl = f"{_p['option_type'].upper()} {_p['underlying']} ${_p['strike']:.0f} exp {_p['expiration']}"
-
-            if _p['status'] == 'open':
-                with st.expander(f"✅ {_lbl} — Mark as Closed"):
-                    _close_m = st.selectbox(
-                        "How was this position closed?",
-                        options=['sold', 'expired_worthless', 'exercised'],
-                        format_func=lambda x: {
-                            'sold':              'Sold at market / limit price',
-                            'expired_worthless': 'Expired worthless (0 value)',
-                            'exercised':         'Exercised at strike price',
-                        }[x],
-                        key=f"close_m_{_idx}"
+        # Manage single-leg positions
+        _open_count  = _sl_open_cnt
+        _closed_count = _sl_cls_cnt
+        with st.expander("Manage Single-Leg Positions"):
+            for _row in _sl_rows:
+                _sidx2 = _row['_idx']
+                _p2    = _opts[_sidx2]
+                _lbl2  = (f"{_p2['option_type'].upper()} {_p2['underlying']} "
+                          f"${_p2['strike']:.0f} exp {_p2['expiration']}")
+                if _p2['status'] == 'open':
+                    st.markdown(f"**✅ {_lbl2}**")
+                    _clm = st.selectbox(
+                        "Close method", ['sold','expired_worthless','exercised'],
+                        format_func=lambda x: {'sold':'Sold','expired_worthless':'Expired worthless',
+                                                'exercised':'Exercised'}[x],
+                        key=f"sl_cm_{_sidx2}"
                     )
-                    _close_price = None
-                    if _close_m == 'sold':
-                        _close_price = st.number_input(
-                            "Sale price received ($/share)",
-                            min_value=0.0, step=0.01, key=f"close_px_{_idx}"
+                    _clp = None
+                    if _clm == 'sold':
+                        _clp = st.number_input("Sale price ($/sh)", min_value=0.0, step=0.01,
+                                               key=f"sl_cp_{_sidx2}")
+                    elif _clm == 'exercised':
+                        _ulpx3 = _ul_prices.get(_p2['underlying'], 0)
+                        _intr2 = (max(_ulpx3 - _p2['strike'], 0) if _p2['option_type'] == 'call'
+                                  else max(_p2['strike'] - _ulpx3, 0))
+                        _clp = st.number_input("Net value at exercise ($/sh)", min_value=0.0,
+                                               value=round(_intr2, 2), step=0.01, key=f"sl_ep_{_sidx2}")
+                    if st.button("Confirm Close", key=f"sl_cls_{_sidx2}"):
+                        st.session_state['options_positions'][_sidx2].update({
+                            'status': 'closed', 'close_method': _clm,
+                            'close_price': _clp, 'close_date': datetime.now().strftime('%Y-%m-%d'),
+                        })
+                        save_options_positions(st.session_state['options_positions'])
+                        st.rerun()
+                else:
+                    _cm3  = _p2.get('close_method', '')
+                    _cst3 = _p2['cost_basis'] * _p2['contracts'] * 100
+                    _pr3  = float(_p2.get('close_price') or 0)
+                    _pnl3 = (-_cst3 if _cm3 == 'expired_worthless'
+                             else _pr3 * _p2['contracts'] * 100 - _cst3)
+                    _clr3 = '#00d4aa' if _pnl3 >= 0 else '#FF6B6B'
+                    st.markdown(
+                        f"⭕ **{_lbl2}** — {_cm3.replace('_',' ').title()} | "
+                        f"<span style='color:{_clr3};'>${_pnl3:,.2f}</span>",
+                        unsafe_allow_html=True
+                    )
+                    if st.button("🗑️ Remove", key=f"sl_rm_{_sidx2}"):
+                        st.session_state['options_positions'].pop(_sidx2)
+                        save_options_positions(st.session_state['options_positions'])
+                        st.rerun()
+                st.divider()
+    else:
+        _open_count = _closed_count = 0
+
+    # ── Strategies display ────────────────────────────────────────────────────
+    if _strategies:
+        st.markdown("#### Multi-Leg Strategies")
+
+        with st.spinner("Fetching live prices for strategy legs…"):
+            for _, _p in _strategies:
+                if _p['status'] != 'open':
+                    continue
+                for _leg in _p.get('legs', []):
+                    _lp2, _liv2 = _live_option(
+                        _p['underlying'], _leg['option_type'],
+                        _leg['strike'], _leg['expiration'], _leg.get('iv_at_entry', 0.3)
+                    )
+                    _leg['_live_price'] = _lp2
+                    _leg['_live_iv']    = _liv2
+
+        for _stidx, _p in _strategies:
+            _legs   = _p.get('legs', [])
+            _is_open = _p['status'] == 'open'
+
+            # Compute combined metrics
+            _net_entry = sum(
+                l['cost_basis'] * l['contracts'] * 100 *
+                (1 if l['position'] == 'long' else -1)
+                for l in _legs
+            )
+            _net_delta = _net_theta = _net_vega = 0.0
+
+            if _is_open:
+                _net_cur = 0.0
+                _all_ok  = True
+                for _leg in _legs:
+                    _lp3 = _leg.get('_live_price')
+                    if _lp3 is None:
+                        _all_ok = False
+                        continue
+                    _sign3 = 1 if _leg['position'] == 'long' else -1
+                    _net_cur += _lp3 * _leg['contracts'] * 100 * _sign3
+                    # Greeks
+                    _exp_dt3 = datetime.strptime(_leg['expiration'], '%Y-%m-%d')
+                    _dte3    = max((_exp_dt3 - datetime.now()).days, 0)
+                    _T3      = max(_dte3 / 365, 0.001)
+                    _ulpx4   = _ul_prices.get(_p['underlying'], 0)
+                    _iv3     = _leg.get('_live_iv', _leg.get('iv_at_entry', 0.3))
+                    if _ulpx4 > 0:
+                        try:
+                            _g3 = _oa.calculate_greeks(
+                                S=_ulpx4, K=_leg['strike'], T=_T3,
+                                sigma=_iv3, option_type=_leg['option_type'], r=0.045
+                            )
+                            _mult = _leg['contracts'] * _sign3
+                            _net_delta += (_g3.get('delta') or 0) * _mult
+                            _net_theta += (_g3.get('theta') or 0) * _mult
+                            _net_vega  += (_g3.get('vega')  or 0) * _mult
+                        except Exception:
+                            pass
+                _strat_pnl     = _net_cur - _net_entry
+                _strat_pnl_pct = (_strat_pnl / abs(_net_entry) * 100) if _net_entry else 0
+                if _all_ok:
+                    _total_opt_val += _net_cur
+                    _total_opt_pnl += _strat_pnl
+                _pnl_str = f"P&L ${_strat_pnl:+,.2f} ({_strat_pnl_pct:+.1f}%)"
+                _entry_str = (f"Credit ${abs(_net_entry):,.2f}" if _net_entry < 0
+                              else f"Debit ${_net_entry:,.2f}")
+                _stat_icon = "✅"
+            else:
+                _cm4 = _p.get('close_method', '')
+                _cp4 = float(_p.get('close_price') or 0)
+                _pnl3b = (_cp4 - _net_entry) if _cm4 != 'expired_worthless' else -abs(_net_entry)
+                _pnl_str   = f"Realised P&L ${_pnl3b:+,.2f}"
+                _entry_str = f"Entry {('Credit' if _net_entry < 0 else 'Debit')} ${abs(_net_entry):,.2f}"
+                _stat_icon = "⭕"
+                _open_count  -= 0   # already counted above for singles; don't double
+
+            _strat_header = (
+                f"{_stat_icon} **{_p['name']}** — {len(_legs)} legs | "
+                f"{_entry_str} | {_pnl_str}"
+            )
+            if _is_open:
+                _strat_header += (
+                    f" | Δ {_net_delta:+.3f} | Θ {_net_theta:+.3f}"
+                )
+
+            with st.expander(_strat_header, expanded=False):
+                # Leg details table
+                _leg_rows = []
+                for _leg in _legs:
+                    _sign4 = 1 if _leg['position'] == 'long' else -1
+                    _lp4   = _leg.get('_live_price')
+                    _lpnl  = ((_lp4 - _leg['cost_basis']) * _leg['contracts'] * 100 * _sign4
+                              if _lp4 is not None else None)
+                    _leg_rows.append({
+                        'Label':     _leg.get('label', ''),
+                        'Type':      _leg['option_type'].upper(),
+                        'Position':  _leg['position'].upper(),
+                        'Strike':    f"${_leg['strike']:.2f}",
+                        'Expiry':    _leg['expiration'],
+                        'Contracts': _leg['contracts'],
+                        'Cost/sh':   f"${_leg['cost_basis']:.2f}",
+                        'Current':   f"${_lp4:.2f}" if _lp4 is not None else 'N/A',
+                        'Leg P&L':   f"${_lpnl:,.2f}" if _lpnl is not None else 'N/A',
+                        'IV':        f"{_leg.get('_live_iv', _leg.get('iv_at_entry',0))*100:.1f}%",
+                    })
+                st.dataframe(pd.DataFrame(_leg_rows), use_container_width=True, hide_index=True)
+
+                # Close / Remove controls
+                if _is_open:
+                    st.markdown("**Close entire strategy:**")
+                    _scm = st.selectbox(
+                        "Close method",
+                        ['bought_to_close', 'expired_worthless', 'partial_close'],
+                        format_func=lambda x: {
+                            'bought_to_close':  'Bought to close (enter net credit/debit received)',
+                            'expired_worthless': 'All legs expired worthless',
+                            'partial_close':    'Partial / custom close (enter net P&L)',
+                        }[x],
+                        key=f"strat_cm_{_stidx}"
+                    )
+                    _scp = None
+                    if _scm in ('bought_to_close', 'partial_close'):
+                        _scp = st.number_input(
+                            "Net amount received to close (negative = paid to close, $/total)",
+                            step=1.0, key=f"strat_cp_{_stidx}"
                         )
-                    elif _close_m == 'exercised':
-                        _ul_p2 = _ul_prices.get(_p['underlying'], 0)
-                        _intr  = max(_ul_p2 - _p['strike'], 0) if _p['option_type'] == 'call' \
-                                 else max(_p['strike'] - _ul_p2, 0)
-                        st.info(f"Current intrinsic value: ${_intr:.2f}/share")
-                        _close_price = st.number_input(
-                            "Net value at exercise ($/share)",
-                            min_value=0.0, value=round(_intr, 2), step=0.01,
-                            key=f"exer_px_{_idx}"
-                        )
-                    if st.button("Confirm Close", key=f"confirm_cls_{_idx}"):
-                        st.session_state['options_positions'][_idx].update({
+                    if st.button("Confirm Strategy Close", key=f"strat_cls_{_stidx}"):
+                        st.session_state['options_positions'][_stidx].update({
                             'status':       'closed',
-                            'close_method': _close_m,
-                            'close_price':  _close_price,
+                            'close_method': _scm,
+                            'close_price':  _scp,
                             'close_date':   datetime.now().strftime('%Y-%m-%d'),
                         })
                         save_options_positions(st.session_state['options_positions'])
                         st.rerun()
-            else:
-                _pnl_raw = None
-                _cst = _p['cost_basis'] * _p['contracts'] * 100
-                _cm2 = _p.get('close_method', '')
-                if _cm2 == 'expired_worthless':
-                    _pnl_raw = -_cst
-                elif _cm2 in ('sold', 'exercised') and _p.get('close_price') is not None:
-                    _pnl_raw = float(_p['close_price']) * _p['contracts'] * 100 - _cst
-
-                _pnl_str = f"P&L ${_pnl_raw:,.2f}" if _pnl_raw is not None else ""
-                with st.expander(f"⭕ {_lbl} — {(_cm2 or 'closed').replace('_',' ').title()} {_pnl_str}"):
-                    st.markdown(f"**Method:** {(_cm2 or '—').replace('_',' ').title()}")
-                    if _p.get('close_price') is not None:
-                        st.markdown(f"**Close price:** ${float(_p['close_price']):.2f}/share")
-                    if _p.get('close_date'):
-                        st.markdown(f"**Date:** {_p['close_date']}")
-                    if _pnl_raw is not None:
-                        _clr = '#00d4aa' if _pnl_raw >= 0 else '#FF6B6B'
-                        st.markdown(
-                            f"**Realised P&L:** <span style='color:{_clr};font-weight:bold;'>"
-                            f"${_pnl_raw:,.2f}</span>",
-                            unsafe_allow_html=True
-                        )
-                    if st.button("🗑️ Remove", key=f"rm_opt_{_idx}"):
-                        st.session_state['options_positions'].pop(_idx)
+                else:
+                    if st.button("🗑️ Remove Strategy", key=f"strat_rm_{_stidx}"):
+                        st.session_state['options_positions'].pop(_stidx)
                         save_options_positions(st.session_state['options_positions'])
                         st.rerun()
 
-        if _closed_count > 0:
-            if st.button("🗑️ Clear All Closed Positions"):
+    if not _singles and not _strategies:
+        st.info("No options positions yet. Use the sidebar **(single legs)** or **🔀 Add Strategy** button above.")
+
+    # ── Options summary metrics ───────────────────────────────────────────────
+    if _singles or _strategies:
+        _s_open  = sum(1 for _, p in _singles    if p['status'] == 'open')
+        _s_cls   = sum(1 for _, p in _singles    if p['status'] == 'closed')
+        _st_open = sum(1 for _, p in _strategies if p['status'] == 'open')
+        _st_cls  = sum(1 for _, p in _strategies if p['status'] == 'closed')
+        _ocm1, _ocm2, _ocm3, _ocm4 = st.columns(4)
+        with _ocm1:
+            st.metric("Open Options Value", f"${_total_opt_val:,.2f}")
+        with _ocm2:
+            st.metric("Unrealised P&L", f"${_total_opt_pnl:,.2f}")
+        with _ocm3:
+            st.metric("Open Positions", f"{_s_open} single · {_st_open} strategies")
+        with _ocm4:
+            st.metric("Closed", f"{_s_cls} single · {_st_cls} strategies")
+
+        if (_s_cls + _st_cls) > 0:
+            if st.button("🗑️ Clear All Closed Options"):
                 st.session_state['options_positions'] = [
                     p for p in _opts if p['status'] == 'open'
                 ]
                 save_options_positions(st.session_state['options_positions'])
                 st.rerun()
 
-    else:
-        st.info("No options positions yet. Use the **📊 Add Options Position** section in the sidebar to add one.")
-
     # ── COMBINED PORTFOLIO TOTALS ────────────────────────────────────────────
-    if _opts:
+    if _singles or _strategies:
         st.subheader("🎯 Combined Portfolio")
-        _stk_val = summary['total_value']
-        _stk_pnl = summary['total_pnl']
+        _stk_val  = summary['total_value']
+        _stk_pnl  = summary['total_pnl']
         _comb_val = _stk_val + _total_opt_val
         _comb_pnl = _stk_pnl + _total_opt_pnl
-
         _c1, _c2, _c3 = st.columns(3)
         with _c1:
             st.markdown("**📈 Stock Portfolio**")
-            st.metric("Value",   f"${_stk_val:,.2f}")
-            st.metric("P&L",     f"${_stk_pnl:,.2f}",
-                      f"{summary['total_pnl_pct']:+.2f}%")
+            st.metric("Value", f"${_stk_val:,.2f}")
+            st.metric("P&L",   f"${_stk_pnl:,.2f}", f"{summary['total_pnl_pct']:+.2f}%")
         with _c2:
             st.markdown("**📊 Options Portfolio**")
-            st.metric("Value (Open)",      f"${_total_opt_val:,.2f}")
-            st.metric("Unrealised P&L",    f"${_total_opt_pnl:,.2f}")
+            st.metric("Value (Open)",   f"${_total_opt_val:,.2f}")
+            st.metric("Unrealised P&L", f"${_total_opt_pnl:,.2f}")
         with _c3:
             st.markdown("**🎯 Combined**")
-            st.metric("Total Value",   f"${_comb_val:,.2f}")
-            st.metric("Total P&L",     f"${_comb_pnl:,.2f}")
+            st.metric("Total Value", f"${_comb_val:,.2f}")
+            st.metric("Total P&L",   f"${_comb_pnl:,.2f}")
 
     # Correlation Matrix & Diversification Score
     st.subheader("🔗 Correlation & Diversification")
