@@ -57,6 +57,22 @@ optimization_method = st.sidebar.selectbox(
     }[x]
 )
 
+expected_return_method = st.sidebar.selectbox(
+    "Expected Return Model",
+    options=['capm', 'black_litterman', 'ema', 'mean_historical'],
+    format_func=lambda x: {
+        'capm':             'CAPM  (rf + β × ERP)',
+        'black_litterman':  'Black-Litterman  (CAPM prior)',
+        'ema':              'EMA Historical Mean',
+        'mean_historical':  'Simple Historical Mean',
+    }[x],
+    help=(
+        "CAPM uses market beta vs SPY. "
+        "Black-Litterman applies BL shrinkage with CAPM as the equilibrium prior. "
+        "Both are more stable out-of-sample than simple historical means."
+    ),
+)
+
 st.sidebar.divider()
 st.sidebar.header("💰 Rebalancing Controls")
 
@@ -119,7 +135,8 @@ if st.button("🚀 Optimize Portfolio", type="primary"):
             optimization_result = optimizer.optimize_portfolio(
                 tickers=tickers,
                 current_regime=current_regime,
-                optimization_method=optimization_method
+                optimization_method=optimization_method,
+                expected_return_method=expected_return_method,
             )
 
             # Store in session state
@@ -142,6 +159,13 @@ if 'optimization_result' in st.session_state:
 
     # Display optimal allocation
     st.subheader("🎯 Optimal Allocation")
+
+    _method_labels = {
+        'capm': 'CAPM', 'black_litterman': 'Black-Litterman',
+        'ema': 'EMA', 'mean_historical': 'Historical Mean',
+    }
+    st.caption(f"Return model: **{_method_labels.get(result.get('return_method', ''), 'CAPM')}** · "
+               f"Regime: **{result.get('regime', '—')}**")
 
     col1, col2, col3, col4 = st.columns(4)
 
