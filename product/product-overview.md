@@ -1,8 +1,8 @@
-# Regime-Aware Portfolio Manager
+# Regime-Aware Portfolio Manager — Product Overview
 
 ## The Problem
 
-Individual investors managing concentrated portfolios (5-15 positions) face a fundamental challenge:
+Individual investors managing concentrated portfolios (5–15 positions) face a fundamental challenge:
 
 **Existing portfolio tools are built for either:**
 - Professional institutions with 50+ positions and professional data feeds
@@ -10,148 +10,157 @@ Individual investors managing concentrated portfolios (5-15 positions) face a fu
 - Pure quant strategies ignoring fundamental quality
 - Pure fundamental strategies ignoring market regime shifts
 
-**What's missing:**
+**What was missing:**
 - No unified system combining quantitative regime detection with fundamental analysis
 - No practical regime-driven rebalancing for personal portfolios
-- No focused tools for concentrated, high-conviction portfolios
+- No focused tools for concentrated, high-conviction portfolios with options exposure
 - Too much data, not enough actionable insight ("What should I do today?")
-
-Current tools show you 50 metrics but don't answer: "Given the current market regime and my portfolio composition, what action should I take?"
-
-## Success Looks Like
-
-**Primary Output:**
-Open the dashboard → See:
-
-1. **Current market regime** (Low Vol / High Vol / Trending / Mean Reversion)
-2. **Portfolio health check**
-   - Current positions with P&L
-   - Performance vs. benchmark
-   - Risk metrics (volatility, drawdown, Sharpe)
-3. **Actionable recommendations**
-   - "Regime shifted to High Vol → Reduce exposure by 15%, increase cash"
-   - "AAPL: Strong fundamentals but momentum weakening → Consider trim"
-   - "Portfolio overweight Tech (45%) → Rebalance to 30%"
-4. **Optimization suggestions**
-   - Optimal allocation given current regime
-   - Rebalancing trades to execute
-   - Expected impact on risk/return
-
-**Validation:**
-"I open this daily and immediately know: (1) What's my regime? (2) How's my portfolio? (3) What should I do?"
-
-No scrolling through 10 pages. No analyzing 50 metrics. **Minimal interface, maximum insight.**
-
-## Building On (Existing Foundations)
-
-### Portfolio Optimization:
-- **PyPortfolioOpt** — Mean-variance, Black-Litterman, HRP optimization
-- **skfolio** — Modern scikit-learn-based portfolio tools
-- **cvxpy** — Convex optimization for custom constraints
-
-### Fundamental Data:
-- **FinanceToolkit** — Financial statements, ratios, quality metrics
-- **yfinance** — Free price data and basic fundamentals
-- **Alpha Vantage** — Free tier for fundamental data (25 calls/day)
-
-### Position Tracking:
-- **Dash/Plotly** — Interactive dashboards
-- **pandas** — Data manipulation and analysis
-- **SQLite** — Local database for position tracking
-
-### Regime Detection:
-- **Concepts from regime-trading-system** — VIX, realized vol, entropy metrics
-- **Academic TAA research** — Meb Faber's quantitative approach
-- **Macro regime frameworks** — Recovery, expansion, slowdown, contraction
-
-## The Unique Part (What We're Building)
-
-**This is NOT another portfolio tracker or optimizer.**
-
-We're building an **intelligent portfolio advisor** that:
-
-### 1. Regime-Aware Allocation Engine
-- Detect current market regime using quantitative signals
-- Map regimes to optimal portfolio characteristics:
-  - **Low Vol Regime** → Quality value, dividend growth, defensive sectors
-  - **High Vol Regime** → Reduce equity exposure, increase cash/bonds, quality focus
-  - **Trending Regime** → Momentum stocks, sector rotation, growth tilt
-  - **Mean Reversion Regime** → Contrarian plays, oversold quality names
-
-### 2. Unified Quant + Fundamental Scoring
-Each position scored on:
-- **Quantitative signals:** Momentum, volatility, correlation, regime fit
-- **Fundamental quality:** Revenue growth, margins, ROE, FCF, debt ratios
-- **Combined score:** Weighted by regime (trending → weight momentum higher, etc.)
-
-### 3. Concentrated Portfolio Optimization
-- Optimize for 5-15 positions (not 50+)
-- Position-level insights, not just portfolio-level
-- Deep analysis per holding:
-  - Why am I holding this?
-  - Does it still fit the current regime?
-  - What's the fundamental story?
-  - What's the quant signal saying?
-
-### 4. Actionable Recommendations
-- **Daily:** "No action needed" vs. "Consider reducing XYZ"
-- **On regime shift:** "Regime changed → Here's your new optimal allocation"
-- **Rebalancing:** "Portfolio drifted → Execute these 3 trades"
-- **New ideas:** "ABC meets your criteria → Consider adding"
-
-### 5. Minimal, Focused Interface
-**Single-page dashboard with 4 panels:**
-- Panel 1: Market regime + key macro indicators
-- Panel 2: Portfolio overview (positions, P&L, risk)
-- Panel 3: Action items (what to do today)
-- Panel 4: Optimization suggestions (rebalancing, new ideas)
-
-**No overwhelming tabs. No metric overload. Just signal.**
-
-## Tech Stack
-
-- **UI:** Streamlit (Python end-to-end, rapid iteration, clean interface)
-- **Optimization:** PyPortfolioOpt, cvxpy
-- **Fundamental Data:** FinanceToolkit, yfinance, Alpha Vantage
-- **Position Tracking:** SQLite (local database), pandas
-- **Regime Detection:** Custom (reuse from regime-trading-system)
-- **Visualization:** plotly (interactive charts)
-- **Analytics:** numpy, scipy, pandas
-
-## Asset Classes Covered
-
-**Phase 1 (MVP):**
-- Equities (individual stocks)
-- ETFs
-- Cash
-
-**Phase 2 (Post-MVP):**
-- Options positions (integrate with regime-trading-system)
-- Bonds/Fixed Income
-- Alternative assets
-
-## Open Questions (Will Resolve During Implementation)
-
-1. **Position entry method:** Manual CSV upload vs. broker API integration?
-2. **Fundamental scoring weights:** How to combine P/E, growth, quality into single score?
-3. **Rebalancing frequency:** Daily suggestions vs. weekly vs. on regime change only?
-4. **Benchmark selection:** SPY default? User-configurable?
-5. **Transaction costs:** Include in optimization or ignore for concentrated portfolios?
-6. **Risk constraints:** Max position size? Sector limits? User-configurable?
-
-## Target User
-
-**Primary:** Individual investors (like you) managing concentrated portfolios
-- Active investors with 5-15 high-conviction positions
-- Want to combine fundamental research with quantitative discipline
-- Recognize that market regimes matter for allocation
-- Value actionable insights over metric overload
-
-**Not for:**
-- Passive index investors (no need for active management)
-- Day traders (this is for position-level decisions, not intraday)
-- Institutional investors (need professional-grade systems with compliance)
 
 ---
 
-*Built with DRIVER Framework | Combining regime detection with fundamental analysis for concentrated portfolios*
+## What Was Built
+
+A 13-page Streamlit application delivering regime-aware portfolio management, options analytics, Monte Carlo simulation, and AI-assisted analysis — all from free public data sources.
+
+### Core Workflow
+
+Open the dashboard → In one session:
+
+1. **Check the current market regime** (Low Vol / High Vol / Trending / Mean Reversion / Uncertain)
+2. **Review portfolio health** — positions, P&L, cash balance, allocation
+3. **Get actionable recommendations** — regime-adjusted scores, buy/sell/hold signals
+4. **Run optimization** — target weights, rebalancing trades including cash
+5. **Analyze options exposure** — live portfolio Greeks, hedge analysis, strategy builder
+6. **Simulate outcomes** — Monte Carlo price paths with 3D probability distribution
+7. **Ask the AI assistant** — conversational analysis with portfolio context
+
+---
+
+## Delivered Features
+
+### Portfolio Tracking (Home)
+- Manual position entry, CSV upload, and sample data loading
+- Real-time P&L using yfinance price data
+- **Cash position tracking** — sidebar cash balance included in total value, allocation pie, and position table
+- Options positions panel supporting single-leg and multi-leg strategies
+- Portfolio persistence via JSON export/import
+- Session state passed to downstream pages (prices, total value, positions)
+
+### Market Regime Detection (Page 2)
+- Five regimes: **Low Vol, High Vol, Trending, Mean Reversion, Uncertain**
+- VIX level + realized volatility + entropy signals
+- Regime timeline visualization and transition history
+- Each regime maps to equity exposure limits used in optimization
+
+### Position Scoring (Page 3)
+- Unified score combining momentum, volatility, regime fit, and fundamentals
+- Weights adapt based on current regime (trending → upweight momentum; high vol → upweight quality)
+
+### Optimization & Rebalancing (Page 4)
+- PyPortfolioOpt EfficientFrontier with Ledoit-Wolf shrinkage covariance
+- **Four expected return methods:**
+  - Mean Historical — simple annualized historical mean
+  - EMA — exponentially weighted historical mean
+  - CAPM — `rf + β × ERP` with betas estimated via OLS against SPY
+  - Black-Litterman — CAPM equilibrium prior with Ledoit-Wolf covariance (shrinkage-adjusted CAPM)
+- Optimization objectives: Max Sharpe, Min Volatility, Max Quadratic Utility
+- Regime equity exposure caps (60–100% depending on regime)
+- **Cash-aware trade calculation** — actual cash balance factored into current weights and CASH trade row
+- Efficient frontier visualization; current vs. target allocation comparison
+
+### Action Dashboard (Page 5)
+- Position-level buy/sell/hold/reduce recommendations
+- Regime-specific trade ideas with rationale
+
+### Options Analytics — Portfolio-Integrated (Page 6)
+- **Recommendations tab**: regime-aware strategy suggestions; portfolio context panel with equity delta and net options Greeks from open positions; contextual risk warnings; account size auto-populated from total portfolio value
+- **Analyze Position tab**: toggle between Manual Input and Live Chain mode; live chain flow (ticker → expiry → call/put → strike → auto-populate form with live spot, IV, mid); Black-Scholes pricing, full Greeks output, P&L range, fair value vs. market price
+- **Portfolio Greeks tab**: aggregates Greeks across all open options positions (singles + strategies); live IV from yfinance option chain with fallback to entry IV; per-position table with IV source indicator; aggregate net Δ/Γ/Θ/V/ρ with risk flags; three charts (delta by underlying, theta+vega, summary); CSV download
+
+### Live Options Chain (Page 7)
+- Real-time chain data via yfinance
+- High-volume scanner, IV smile/skew analysis
+- Probability analysis: PoP, expected value, touch probability (lognormal integrals)
+- Multi-leg strategy builder with 8 templates: Iron Condor, Bull Call Spread, Bear Put Spread, Long Straddle, Long Strangle, Short Strangle, Iron Butterfly, Call Butterfly
+
+### AI Assistant (Page 8)
+- OpenRouter LLM with streaming responses and portfolio context injection
+- **Offline mode** — no API key required; falls back to a rule-based response engine covering regime analysis, Greeks, optimization, position scoring, and general portfolio questions
+
+### Portfolio Hedge Analyzer (Page 9)
+- Protective put, put spread, and collar analysis
+- Regime-aware hedge sizing recommendations
+
+### Volatility Surface (Page 10)
+- 3D implied volatility surface (strike × expiry × IV) using `go.Surface`
+- 2D heatmap toggle, term structure chart, and skew analysis
+
+### Options Flow (Page 11)
+- Unusual options activity scanner
+- Flow heatmap by ticker and expiry; volume/OI analysis
+
+### Trade Suggestions (Page 12)
+- Algorithm-scored trade ideas with regime filtering
+- Strategy cards with risk/reward summaries
+
+### Monte Carlo Simulation (Page 13)
+- **Geometric Brownian Motion**: `S(t) = S0 · exp((μ − σ²/2)t + σ√t · Z)`
+- Parameters (μ, σ) estimated from historical daily log-returns, annualized
+- **Regime drift adjustment** — blends historical drift toward risk-free rate based on regime (High Vol = conservative, Trending = amplified, Uncertain = 50% blend)
+- Fan chart with sample paths and percentile bands (p5/p25/p50/p75/p95)
+- **3D price distribution surface** — probability density across time and price; 60 time snapshots × 80 price bins; cyan-to-white colorscale; toggle to 2D heatmap
+- Key metrics: median price, probability of gain, VaR 95%, CVaR 95%
+- Distribution histogram, percentile table (5th–95th), VaR/CVaR bar chart, return probability by bucket
+- Multi-ticker overlay for side-by-side comparison
+
+---
+
+## Open Questions — Resolved
+
+| Question | Resolution |
+|---|---|
+| Position entry method? | Manual entry + CSV upload (no broker API needed) |
+| Fundamental scoring weights? | Regime-adaptive weights combining momentum, volatility, growth, quality, valuation |
+| Rebalancing frequency? | On-demand; triggered by user or regime change |
+| Benchmark selection? | SPY as market proxy for CAPM betas; configurable lookback |
+| Transaction costs? | Excluded from optimization (concentrated portfolio assumption) |
+| Risk constraints? | 30% max single position; regime-based equity exposure cap; configurable |
+| Options integration? | Full — single-leg and multi-leg positions tracked, Greeks aggregated |
+| Cash tracking? | Full — cash balance in all metrics, allocation charts, and rebalancing trades |
+| AI integration? | OpenRouter LLM with graceful offline fallback |
+
+---
+
+## Tech Stack (Delivered)
+
+| Layer | Technology |
+|---|---|
+| UI | Streamlit |
+| Data | yfinance (free public API) |
+| Optimization | PyPortfolioOpt (EfficientFrontier, Ledoit-Wolf, Black-Litterman) |
+| Options Pricing | Black-Scholes (custom), scipy.stats |
+| Simulation | NumPy Geometric Brownian Motion |
+| Visualization | Plotly (2D + 3D interactive), Matplotlib |
+| AI | OpenRouter API + rule-based offline fallback |
+| Data Processing | pandas, numpy |
+
+---
+
+## Target User
+
+**Primary:** Active individual investors managing concentrated portfolios (5–15 positions)
+- Combine fundamental conviction with quantitative discipline
+- Trade both equities and options
+- Want regime-aware allocation guidance, not passive tracking
+- Value actionable signal over metric overload
+
+**Not for:**
+- Passive index investors
+- Day traders (position-level decisions, not intraday)
+- Institutional investors (need compliance-grade systems)
+
+---
+
+*Built with the DRIVER Framework | Claude Code as Cognition Mate*
+
+**Co-Authored-By: Claude Sonnet 4.6 <noreply@anthropic.com>**
