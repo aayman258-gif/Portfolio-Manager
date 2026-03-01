@@ -129,7 +129,8 @@ if st.button("🚀 Optimize Portfolio", type="primary"):
 
             # Calculate current portfolio metrics
             position_metrics = loader.calculate_position_metrics(positions_df, current_prices)
-            total_value = position_metrics['current_value'].sum()
+            cash_balance = st.session_state.get('cash_balance', 0.0)
+            total_value = position_metrics['current_value'].sum() + cash_balance
 
             # Run optimization
             optimization_result = optimizer.optimize_portfolio(
@@ -156,6 +157,7 @@ if 'optimization_result' in st.session_state:
     result = st.session_state['optimization_result']
     current_prices = st.session_state['current_prices']
     total_value = st.session_state['total_value']
+    cash_balance = st.session_state.get('cash_balance', 0.0)
 
     # Display optimal allocation
     st.subheader("🎯 Optimal Allocation")
@@ -184,12 +186,14 @@ if 'optimization_result' in st.session_state:
     # Weights comparison
     st.subheader("📊 Allocation Comparison")
 
-    # Current weights
+    # Current weights (equities + actual cash)
     current_weights = {}
     for _, pos in positions_df.iterrows():
         ticker = pos['ticker']
         value = pos['shares'] * current_prices.get(ticker, 0)
-        current_weights[ticker] = value / total_value
+        current_weights[ticker] = value / total_value if total_value > 0 else 0.0
+    if cash_balance > 0 and total_value > 0:
+        current_weights['CASH'] = cash_balance / total_value
 
     # Create comparison dataframe
     all_tickers = set(list(current_weights.keys()) + list(result['weights'].keys()))
@@ -232,12 +236,16 @@ if 'optimization_result' in st.session_state:
     col1, col2 = st.columns(2)
 
     with col1:
-        # Current allocation pie chart
+        # Current allocation pie chart (equities + cash)
+        _cur_labels = list(current_weights.keys())
+        _cur_vals   = [v * 100 for v in current_weights.values()]
+        _cur_colors = ['#4ade80' if lbl == 'CASH' else None for lbl in _cur_labels]
         fig_current = go.Figure(data=[go.Pie(
-            labels=list(current_weights.keys()),
-            values=[v*100 for v in current_weights.values()],
+            labels=_cur_labels,
+            values=_cur_vals,
             hole=0.3,
-            title="Current Allocation"
+            title="Current Allocation",
+            marker=dict(colors=_cur_colors),
         )])
 
         fig_current.update_layout(**carbon_plotly_layout(height=400))
@@ -294,7 +302,8 @@ if 'optimization_result' in st.session_state:
         current_positions=positions_df,
         optimal_weights=result['weights'],
         current_prices=current_prices,
-        total_portfolio_value=total_value
+        total_portfolio_value=total_value,
+        current_cash_weight=cash_balance / total_value if total_value > 0 else 0.0,
     )
 
     if not trades_df.empty:

@@ -279,8 +279,17 @@ class RegimeAwareOptimizer:
         optimal_weights: Dict[str, float],
         current_prices: Dict[str, float],
         total_portfolio_value: float,
+        current_cash_weight: float = 0.0,
     ) -> pd.DataFrame:
-        """Calculate trades needed to reach optimal weights."""
+        """Calculate trades needed to reach optimal weights.
+
+        Parameters
+        ----------
+        current_cash_weight : float
+            Fraction of the total portfolio currently held as cash (0–1).
+            Pass ``cash_balance / total_portfolio_value`` from the Home page
+            so the CASH trade row reflects the actual uninvested balance.
+        """
         trades = []
 
         current_weights: Dict[str, float] = {}
@@ -312,7 +321,8 @@ class RegimeAwareOptimizer:
                         'Weight Change':  (ow - cw) * 100,
                     })
 
-        cw_cash = current_weights.get('CASH', 0)
+        # Use actual cash balance if provided, else fall back to positions-derived weight
+        cw_cash = current_cash_weight if current_cash_weight > 0 else current_weights.get('CASH', 0)
         ow_cash = optimal_weights.get('CASH', 0)
         if abs(ow_cash - cw_cash) > 0.01:
             cash_diff = (ow_cash - cw_cash) * total_portfolio_value
