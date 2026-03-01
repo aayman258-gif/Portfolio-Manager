@@ -419,7 +419,159 @@ fig_paths.update_layout(
 )
 st.plotly_chart(fig_paths, use_container_width=True)
 
-# ── Section 2: Key metrics ────────────────────────────────────────────────────
+# ── Section 2: 3D Distribution Surface ───────────────────────────────────────
+
+st.subheader(f"🏔️ 3D Price Distribution Surface — {selected_ticker}")
+
+_N_TIME = 60    # time snapshots along the horizon
+_N_BINS = 80    # price bins for density estimation
+
+# Sample evenly-spaced time indices across the horizon
+_t_indices = np.unique(np.linspace(0, horizon_days, _N_TIME, dtype=int))
+
+# Fixed price grid spanning p0.5 – p99.5 of all paths
+_p_min = float(np.percentile(paths, 0.5))
+_p_max = float(np.percentile(paths, 99.5))
+_bin_edges   = np.linspace(_p_min, _p_max, _N_BINS + 1)
+_bin_centers = (_bin_edges[:-1] + _bin_edges[1:]) / 2
+
+# Build density matrix: shape (N_BINS, N_TIME)
+_density = np.zeros((len(_bin_centers), len(_t_indices)))
+for j, t_idx in enumerate(_t_indices):
+    counts, _ = np.histogram(paths[t_idx], bins=_bin_edges, density=True)
+    _density[:, j] = counts
+
+# View mode toggle
+_view_3d = st.radio(
+    "Surface view", ["3D Surface", "2D Heatmap"],
+    horizontal=True, key="mc_3d_view",
+)
+
+if _view_3d == "3D Surface":
+    fig_3d = go.Figure(go.Surface(
+        x=_t_indices,        # trading days     (N_TIME,)
+        y=_bin_centers,      # price levels     (N_BINS,)
+        z=_density,          # density matrix   (N_BINS, N_TIME)
+        colorscale=[
+            [0.00, BG],
+            [0.15, "#0e4f5e"],
+            [0.40, "#0e7490"],
+            [0.70, ACCENT],
+            [0.90, "#a5f3fc"],
+            [1.00, "#ffffff"],
+        ],
+        colorbar=dict(
+            title=dict(text="Density", font=dict(color=SUBTLE, size=10)),
+            tickfont=dict(color=SUBTLE, size=9),
+            thickness=12,
+        ),
+        hovertemplate=(
+            "Day: %{x}<br>"
+            "Price: $%{y:.2f}<br>"
+            "Density: %{z:.5f}<extra></extra>"
+        ),
+        opacity=0.92,
+        lighting=dict(ambient=0.7, diffuse=0.6, roughness=0.4, specular=0.3),
+    ))
+    # Vertical plane at S0 (current price) — thin horizontal line at each time step
+    _s0_plane_z = np.zeros((2, len(_t_indices)))
+    for j, t_idx in enumerate(_t_indices):
+        # mark density at S0 for this time step
+        _closest_bin = int(np.argmin(np.abs(_bin_centers - S0)))
+        _s0_plane_z[0, j] = 0
+        _s0_plane_z[1, j] = _density[_closest_bin, j]
+    fig_3d.add_trace(go.Surface(
+        x=_t_indices,
+        y=[S0, S0],
+        z=_s0_plane_z,
+        colorscale=[[0, "rgba(251,113,133,0.0)"], [1, "rgba(251,113,133,0.55)"]],
+        showscale=False,
+        hoverinfo="skip",
+        opacity=0.55,
+        name=f"S₀ = ${S0:.2f}",
+    ))
+    fig_3d.update_layout(
+        **carbon_plotly_layout(
+            height=620,
+            title=(
+                f"{selected_ticker} — price density evolution · "
+                f"{n_sims:,} simulations · {horizon_days}d horizon"
+            ),
+            scene=dict(
+                xaxis=dict(
+                    title="Trading Day",
+                    gridcolor="rgba(107,122,143,0.2)",
+                    color=FG,
+                    tickfont=dict(color=SUBTLE, size=9),
+                    titlefont=dict(color=SUBTLE, size=10),
+                ),
+                yaxis=dict(
+                    title="Price ($)",
+                    gridcolor="rgba(107,122,143,0.2)",
+                    color=FG,
+                    tickfont=dict(color=SUBTLE, size=9),
+                    titlefont=dict(color=SUBTLE, size=10),
+                    tickprefix="$",
+                ),
+                zaxis=dict(
+                    title="Probability Density",
+                    gridcolor="rgba(107,122,143,0.2)",
+                    color=FG,
+                    tickfont=dict(color=SUBTLE, size=9),
+                    titlefont=dict(color=SUBTLE, size=10),
+                ),
+                bgcolor=BG,
+                camera=dict(eye=dict(x=1.6, y=-1.6, z=0.9)),
+            ),
+            margin=dict(l=0, r=0, t=50, b=0),
+        )
+    )
+else:  # 2D Heatmap
+    _day_labels = [str(d) for d in _t_indices]
+    _price_labels = [f"${p:.0f}" for p in _bin_centers]
+    fig_3d = go.Figure(go.Heatmap(
+        x=_day_labels,
+        y=_price_labels,
+        z=_density,
+        colorscale=[
+            [0.00, BG],
+            [0.20, "#0e7490"],
+            [0.55, ACCENT],
+            [0.85, "#a5f3fc"],
+            [1.00, "#ffffff"],
+        ],
+        colorbar=dict(
+            title=dict(text="Density", font=dict(color=SUBTLE, size=10)),
+            tickfont=dict(color=SUBTLE, size=9),
+            thickness=12,
+        ),
+        hovertemplate="Day: %{x}<br>Price: %{y}<br>Density: %{z:.5f}<extra></extra>",
+    ))
+    # Mark current price
+    fig_3d.add_hline(
+        y=f"${S0:.0f}",
+        line_dash="dot", line_color=LOSS, line_width=1.5,
+        annotation_text=f"  S₀ ${S0:.2f}",
+        annotation_font_color=LOSS,
+    )
+    fig_3d.update_layout(
+        **carbon_plotly_layout(
+            height=520,
+            title=f"{selected_ticker} — density heatmap (day × price)",
+            xaxis_title="Trading Day",
+            yaxis_title="Price ($)",
+        )
+    )
+
+st.plotly_chart(fig_3d, use_container_width=True)
+st.caption(
+    f"Each vertical cross-section is the probability density of {selected_ticker} prices "
+    f"on that trading day across all {n_sims:,} simulations. "
+    f"The pink semi-transparent plane marks the current price S₀ = ${S0:.2f}. "
+    f"The distribution broadens (and shifts) as the horizon extends."
+)
+
+# ── Section 3: Key metrics ────────────────────────────────────────────────────
 
 st.subheader("📊 Outcome Metrics")
 
@@ -454,7 +606,7 @@ with c8:
     st.metric("Sharpe (implied)", f"{(mu - _RF) / sigma:.2f}" if sigma > 0 else "—",
               help="(μ − rf) / σ using the simulated drift and 4% risk-free rate.")
 
-# ── Section 3: Distribution + percentile table ────────────────────────────────
+# ── Section 4: Distribution + percentile table ────────────────────────────────
 
 st.subheader("📉 Final Price Distribution")
 
@@ -543,7 +695,7 @@ with col_tbl:
         unsafe_allow_html=True,
     )
 
-# ── Section 4: VaR / CVaR bar chart ──────────────────────────────────────────
+# ── Section 5: VaR / CVaR bar chart ──────────────────────────────────────────
 
 st.subheader("🛡️ Risk Summary")
 
