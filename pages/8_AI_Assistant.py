@@ -510,6 +510,132 @@ def _render_suggestion_cards(action_result: Dict[str, Any]) -> None:
                 st.warning(f"Validation error: {err}")
 
 
+# ─── Offline / rule-based fallback ──────────────────────────────────────────────
+
+def _rule_based_response(user_text: str) -> str:
+    """
+    Generate a structured portfolio response without an LLM.
+    Keyword-matched against the user message; uses session state data.
+    Activated when no API key is configured.
+    """
+    q = user_text.lower()
+
+    positions_df   = st.session_state.get("positions")
+    current_prices = st.session_state.get("current_prices") or {}
+    total_value    = st.session_state.get("total_value")
+
+    def _has_positions() -> bool:
+        return isinstance(positions_df, pd.DataFrame) and len(positions_df) > 0
+
+    # ── Regime ────────────────────────────────────────────────────────────────
+    if any(w in q for w in ("regime", "market condition", "environment", "vix")):
+        try:
+            regime, _ = _compute_current_regime()
+            from calculations.regime_detector import RegimeDetector as _RD
+            desc = _RD().get_regime_description(regime)
+            return (
+                f"**Current Market Regime: {regime}**\n\n"
+                f"{desc['description']}\n\n"
+                f"**Characteristics:** {desc['characteristics']}\n\n"
+                f"**Portfolio implication:** {desc['portfolio_implications']}\n\n"
+                f"**Suggested strategy:** {desc['strategy']}\n\n"
+                f"**Recommended equity exposure:** {desc['recommended_exposure']}"
+            )
+        except Exception as exc:
+            return f"Could not compute current regime: {exc}"
+
+    # ── P&L / performance ─────────────────────────────────────────────────────
+    if any(w in q for w in ("p&l", "pnl", "gain", "loss", "performance", "return")):
+        if not _has_positions():
+            return "No portfolio loaded. Go to the Home page and add positions first."
+        total_pnl = 0.0
+        lines = []
+        for _, row in positions_df.iterrows():
+            ticker = row.get("ticker", "")
+            shares = float(row.get("shares", 0))
+            cost   = float(row.get("cost_basis", 0))
+            price  = float(current_prices.get(ticker, cost))
+            pnl    = (price - cost) * shares
+            pct    = (price / cost - 1) * 100 if cost > 0 else 0.0
+            total_pnl += pnl
+            sign = "+" if pnl >= 0 else ""
+            lines.append(f"- **{ticker}**: {sign}${pnl:,.0f} ({sign}{pct:.1f}%)")
+        sign = "+" if total_pnl >= 0 else ""
+        return f"**P&L Breakdown** — Total: {sign}${total_pnl:,.0f}\n\n" + "\n".join(lines)
+
+    # ── Portfolio / holdings summary ───────────────────────────────────────────
+    if any(w in q for w in ("portfolio", "holding", "position", "summary", "overview")):
+        if not _has_positions():
+            return "No portfolio loaded. Go to the Home page and add positions first."
+        tv = _safe_float(total_value)
+        tv_str = f"${tv:,.0f}" if tv else "unknown"
+        rows = []
+        for _, row in positions_df.iterrows():
+            ticker = row.get("ticker", "")
+            shares = float(row.get("shares", 0))
+            cost   = float(row.get("cost_basis", 0))
+            price  = float(current_prices.get(ticker, cost))
+            val    = shares * price
+            pnl    = (price - cost) * shares
+            sign   = "+" if pnl >= 0 else ""
+            rows.append(
+                f"- **{ticker}**: {shares:.0f} sh @ ${price:.2f} = ${val:,.0f}  "
+                f"(P&L: {sign}${pnl:,.0f})"
+            )
+        return (
+            f"**Portfolio Summary** — Total Value: {tv_str}\n\n"
+            + "\n".join(rows)
+            + "\n\n*Load prices on the Home page for live values.*"
+        )
+
+    # ── Optimization / rebalancing ─────────────────────────────────────────────
+    if any(w in q for w in ("optim", "rebalanc", "weight", "allocat")):
+        opt = st.session_state.get("optimization_result")
+        if isinstance(opt, dict) and opt:
+            w_str = "\n".join(
+                f"- **{k}**: {v*100:.1f}%"
+                for k, v in opt.get("weights", {}).items()
+            )
+            return (
+                f"**Last Optimization** — Regime: {opt.get('regime','—')} | "
+                f"Model: {opt.get('return_method','—')}\n\n"
+                f"Expected Return: **{opt.get('expected_return',0):.1f}%** · "
+                f"Volatility: **{opt.get('volatility',0):.1f}%** · "
+                f"Sharpe: **{opt.get('sharpe_ratio',0):.2f}**\n\n"
+                f"**Target Weights:**\n{w_str}\n\n"
+                f"Navigate to **Optimization & Rebalancing** (page 4) to run a fresh optimization."
+            )
+        return (
+            "No optimization has been run yet. "
+            "Go to **Portfolio Optimization & Rebalancing** (page 4) "
+            "and click *Optimize Portfolio*."
+        )
+
+    # ── Risk ──────────────────────────────────────────────────────────────────
+    if any(w in q for w in ("risk", "hedge", "protect", "drawdown", "volatil")):
+        return (
+            "For risk and hedging analysis, see:\n\n"
+            "- **Portfolio Hedge Analyzer** (page 9) — protective puts, collars, put spreads\n"
+            "- **Vol Surface** (page 10) — implied volatility term structure and skew\n"
+            "- **Options Flow** (page 11) — unusual options activity\n\n"
+            "Detailed metrics also appear in the **Action Dashboard** (page 5)."
+        )
+
+    # ── Default help ──────────────────────────────────────────────────────────
+    return (
+        "I'm running in **offline mode** — no OpenRouter API key is configured.\n\n"
+        "I can answer questions about:\n"
+        "- **Portfolio / holdings / summary** — your current positions\n"
+        "- **P&L / performance / gains / losses** — profit & loss breakdown\n"
+        "- **Regime / market / environment** — current market regime\n"
+        "- **Optimize / rebalance / allocation** — last optimization result\n"
+        "- **Risk / hedge / volatility** — where to find risk tools\n\n"
+        "To enable full AI responses, add your key:\n"
+        "```toml\n# .streamlit/secrets.toml\n"
+        "OPENROUTER_API_KEY = \"sk-or-...\"\n```"
+    )
+
+
 # ─── Chat state helpers ──────────────────────────────────────────────────────────
 
 def _init_chat() -> None:
@@ -609,14 +735,15 @@ def main() -> None:
     _init_chat()
 
     api_key = _get_openrouter_api_key()
-    if not api_key:
-        st.error(
-            "Missing OpenRouter API key. "
-            "Add `OPENROUTER_API_KEY` to `.streamlit/secrets.toml` or set it as an environment variable."
+    offline_mode = not api_key
+    if offline_mode:
+        st.info(
+            "**Offline mode** — no OpenRouter API key found. "
+            "Answering with rule-based responses using your portfolio data. "
+            "Add `OPENROUTER_API_KEY` to `.streamlit/secrets.toml` for full AI responses."
         )
-        st.stop()
 
-    client = _get_llm_client(api_key=api_key)
+    client = _get_llm_client(api_key=api_key) if not offline_mode else None
 
     # Render existing conversation (skip system message)
     for msg in st.session_state[CHAT_KEY]:
@@ -642,6 +769,14 @@ def main() -> None:
     st.session_state[CHAT_KEY].append({"role": "user", "content": user_text})
     with st.chat_message("user"):
         st.markdown(user_text)
+
+    # Offline: rule-based fallback — no LLM needed
+    if offline_mode:
+        response = _rule_based_response(user_text)
+        with st.chat_message("assistant"):
+            st.markdown(response)
+        st.session_state[CHAT_KEY].append({"role": "assistant", "content": response})
+        return
 
     # Build LLM message list:
     #   [system] + [fresh context snapshot] + [last 12 conversation turns]
