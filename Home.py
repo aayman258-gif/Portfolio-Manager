@@ -130,6 +130,12 @@ _HOLDING_COLORS = [
     '#164e63', '#bae6fd', '#0284c7', '#93c5fd', '#0ea5e9',
 ]
 
+# Options color family — amber / warm-orange shades
+_OPT_COLORS = [
+    '#f59e0b', '#fbbf24', '#fcd34d', '#f97316', '#fb923c',
+    '#fdba74', '#d97706', '#b45309', '#a16207', '#ca8a04',
+]
+
 # Page config
 st.set_page_config(
     page_title="Portfolio Position Tracker",
@@ -818,11 +824,13 @@ if st.session_state.get('_opt_chain'):
 if 'positions' in st.session_state:
     positions_df = st.session_state['positions']
 
-summary          = None   # set inside if-block when stocks are loaded
-_opts_tbl_slot   = None   # placeholder: options single-leg table
-_strat_btn_slot  = None   # placeholder: strategy builder toggle + UI
-_opts_mgmt_slot  = None   # placeholder: manage expanders + strategies + metrics
-_combined_slot   = None   # placeholder: combined portfolio totals
+summary                = None   # set inside if-block when stocks are loaded
+position_metrics       = None   # set inside if-block; accessible for chart slot-fill
+_opts_tbl_slot         = None   # placeholder: options single-leg table
+_strat_btn_slot        = None   # placeholder: strategy builder toggle + UI
+_opts_mgmt_slot        = None   # placeholder: manage expanders + strategies + metrics
+_combined_slot         = None   # placeholder: combined portfolio totals
+_holdings_charts_slot  = None   # placeholder: holdings + options charts (filled after opts prices)
 
 if positions_df is not None and not positions_df.empty:
 
@@ -1037,55 +1045,8 @@ if positions_df is not None and not positions_df.empty:
     # Holdings Breakdown
     st.subheader("🥧 Holdings Breakdown")
 
-    col1, col2 = st.columns(2)
-
-    with col1:
-        # Pie chart by value — one distinct color per holding
-        n = len(position_metrics)
-        holding_colors = [_HOLDING_COLORS[i % len(_HOLDING_COLORS)] for i in range(n)]
-
-        fig_pie = go.Figure(data=[go.Pie(
-            labels=position_metrics['ticker'],
-            values=position_metrics['current_value'],
-            hole=0.3,
-            textinfo='label+percent',
-            marker=dict(colors=holding_colors)
-        )])
-
-        fig_pie.update_layout(
-            title="Portfolio Allocation by Value",
-            height=400,
-            **_home_plotly_layout()
-        )
-
-        st.plotly_chart(fig_pie, use_container_width=True)
-
-    with col2:
-        # Bar chart P&L
-        colors = position_metrics['total_pnl'].apply(
-            lambda x: _H_GAIN if x > 0 else _H_LOSS if x < 0 else '#555555'
-        )
-
-        fig_bar = go.Figure(data=[go.Bar(
-            x=position_metrics['ticker'],
-            y=position_metrics['total_pnl'],
-            marker_color=colors,
-            text=position_metrics['total_pnl'],
-            texttemplate='$%{text:,.0f}',
-            textposition='outside'
-        )])
-
-        fig_bar.update_layout(
-            title="P&L by Position",
-            xaxis_title="Ticker",
-            yaxis_title="P&L ($)",
-            height=400,
-            **_home_plotly_layout()
-        )
-
-        fig_bar.add_hline(y=0, line_dash="dash", line_color="#2a2a2a")
-
-        st.plotly_chart(fig_bar, use_container_width=True)
+    # Charts are filled after options prices are fetched (slot pattern)
+    _holdings_charts_slot = st.container()
 
     # Correlation Matrix & Diversification Score
     st.subheader("🔗 Correlation & Diversification")
@@ -2115,4 +2076,147 @@ with _comb_ctx:
         st.markdown("**🎯 Combined**")
         st.metric("Total Value", f"${_comb_val:,.2f}")
         st.metric("Total P&L",   f"${_comb_pnl:,.2f}")
+
+# ── Holdings charts — filled here after options prices are known ──────────
+if _holdings_charts_slot is not None and position_metrics is not None:
+
+    # ── Build options slice data from open positions ──────────────────────
+    _opt_slices   = []   # [{label, value, pnl}] for options breakdown pie + P&L bar
+    _opt_total_val = 0.0
+
+    for _, _cp in _singles:
+        if _cp['status'] != 'open':
+            continue
+        _lp_c  = _cp.get('_live_price')
+        _ct_c  = _cp['cost_basis'] * _cp['contracts'] * 100
+        _mv_c  = (_lp_c * _cp['contracts'] * 100) if _lp_c is not None else _ct_c
+        _mv_c  = max(_mv_c, 0) or _ct_c          # guarantee positive for pie
+        _pnl_c = (_mv_c - _ct_c) if _lp_c is not None else 0.0
+        _lbl_c = f"{_cp['underlying']} {_cp['option_type'].upper()} ${_cp['strike']:.0f}"
+        _opt_slices.append({'label': _lbl_c, 'value': _mv_c, 'pnl': _pnl_c})
+        _opt_total_val += _mv_c
+
+    for _, _sp in _strategies:
+        if _sp['status'] != 'open':
+            continue
+        _legs_s  = _sp.get('legs', [])
+        _net_ent = sum(
+            l['cost_basis'] * l['contracts'] * 100 * (1 if l['position'] == 'long' else -1)
+            for l in _legs_s
+        )
+        _net_cur_s, _all_ok_s = 0.0, True
+        for _lg_s in _legs_s:
+            _lp_s = _lg_s.get('_live_price')
+            if _lp_s is None:
+                _all_ok_s = False
+                break
+            _net_cur_s += _lp_s * _lg_s['contracts'] * 100 * (1 if _lg_s['position'] == 'long' else -1)
+        if not _all_ok_s:
+            _net_cur_s = _net_ent               # cost basis fallback
+        _mv_s  = max(abs(_net_cur_s), abs(_net_ent)) or 1.0   # positive for pie
+        _pnl_s = (_net_cur_s - _net_ent) if _all_ok_s else 0.0
+        _opt_slices.append({'label': _sp['name'], 'value': _mv_s, 'pnl': _pnl_s})
+        _opt_total_val += _mv_s
+
+    with _holdings_charts_slot:
+        _hcol1, _hcol2 = st.columns(2)
+
+        # ── LEFT: pie toggle ──────────────────────────────────────────────
+        with _hcol1:
+            _pie_view = st.radio(
+                "Pie view", ["Portfolio Holdings", "Options Breakdown"],
+                horizontal=True, key="_pie_view", label_visibility="collapsed",
+            )
+
+            if _pie_view == "Portfolio Holdings":
+                # Stock slices + one Options bucket
+                _pie_labels = list(position_metrics['ticker'])
+                _pie_vals   = list(position_metrics['current_value'])
+                _pie_colors = [_HOLDING_COLORS[i % len(_HOLDING_COLORS)]
+                               for i in range(len(_pie_labels))]
+                if _opt_total_val > 0:
+                    _pie_labels.append("Options")
+                    _pie_vals.append(_opt_total_val)
+                    _pie_colors.append('#f59e0b')   # amber bucket
+
+                fig_pie = go.Figure(data=[go.Pie(
+                    labels=_pie_labels, values=_pie_vals, hole=0.3,
+                    textinfo='label+percent',
+                    marker=dict(colors=_pie_colors),
+                )])
+                fig_pie.update_layout(
+                    title="Portfolio Allocation by Value",
+                    height=400, **_home_plotly_layout()
+                )
+                st.plotly_chart(fig_pie, use_container_width=True)
+
+            else:  # Options Breakdown
+                if _opt_slices:
+                    _op_labels  = [s['label'] for s in _opt_slices]
+                    _op_vals    = [s['value'] for s in _opt_slices]
+                    _op_colors  = [_OPT_COLORS[i % len(_OPT_COLORS)]
+                                   for i in range(len(_op_labels))]
+                    fig_opie = go.Figure(data=[go.Pie(
+                        labels=_op_labels, values=_op_vals, hole=0.3,
+                        textinfo='label+percent',
+                        marker=dict(colors=_op_colors),
+                    )])
+                    fig_opie.update_layout(
+                        title="Options Allocation by Market Value",
+                        height=400, **_home_plotly_layout()
+                    )
+                    st.plotly_chart(fig_opie, use_container_width=True)
+                else:
+                    st.info("No open options positions to display.")
+
+        # ── RIGHT: P&L bar toggle ─────────────────────────────────────────
+        with _hcol2:
+            _bar_view = st.radio(
+                "P&L view", ["Stock P&L", "Options P&L"],
+                horizontal=True, key="_bar_view", label_visibility="collapsed",
+            )
+
+            if _bar_view == "Stock P&L":
+                _bar_colors = position_metrics['total_pnl'].apply(
+                    lambda x: _H_GAIN if x > 0 else _H_LOSS if x < 0 else _H_DIM
+                )
+                fig_bar = go.Figure(data=[go.Bar(
+                    x=position_metrics['ticker'],
+                    y=position_metrics['total_pnl'],
+                    marker_color=_bar_colors,
+                    text=position_metrics['total_pnl'],
+                    texttemplate='$%{text:,.0f}',
+                    textposition='outside',
+                )])
+                fig_bar.update_layout(
+                    title="Stock P&L by Position",
+                    xaxis_title="Ticker", yaxis_title="P&L ($)",
+                    height=400, **_home_plotly_layout()
+                )
+                fig_bar.add_hline(y=0, line_dash="dash", line_color=_H_BORDER)
+                st.plotly_chart(fig_bar, use_container_width=True)
+
+            else:  # Options P&L
+                if _opt_slices:
+                    _op_pnl_colors = [
+                        _H_GAIN if s['pnl'] > 0 else _H_LOSS if s['pnl'] < 0 else _H_DIM
+                        for s in _opt_slices
+                    ]
+                    fig_obar = go.Figure(data=[go.Bar(
+                        x=[s['label'] for s in _opt_slices],
+                        y=[s['pnl']   for s in _opt_slices],
+                        marker_color=_op_pnl_colors,
+                        text=[s['pnl'] for s in _opt_slices],
+                        texttemplate='$%{text:,.0f}',
+                        textposition='outside',
+                    )])
+                    fig_obar.update_layout(
+                        title="Options Unrealised P&L",
+                        xaxis_title="Position", yaxis_title="P&L ($)",
+                        height=400, **_home_plotly_layout()
+                    )
+                    fig_obar.add_hline(y=0, line_dash="dash", line_color=_H_BORDER)
+                    st.plotly_chart(fig_obar, use_container_width=True)
+                else:
+                    st.info("No open options positions to display.")
 
