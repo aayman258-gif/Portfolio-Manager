@@ -16,7 +16,7 @@ from datetime import datetime
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
 
 from data.options_data import OptionsDataLoader
 from calculations.options_analytics import OptionsAnalytics
@@ -32,8 +32,7 @@ st.set_page_config(
 )
 apply_carbon_theme()
 
-st.title("🔴 Live Options Chain")
-st.markdown("**Section 7:** Pull real-time options data from public API")
+page_header("🔴 Live Options Chain", "Pull real-time options data from public API")
 
 # Initialize
 options_loader = OptionsDataLoader()

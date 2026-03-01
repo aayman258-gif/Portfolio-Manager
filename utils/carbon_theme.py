@@ -463,6 +463,24 @@ def regime_color(regime: str) -> str:
     }.get(regime, DIM)
 
 
+def page_header(title: str, subtitle: str = "") -> None:
+    """Render a centered Carbon-theme page heading with optional subtitle and divider."""
+    sub_html = (
+        f'<div style="font-family:{_PALATINO};font-size:0.78rem;font-weight:400;'
+        f'font-style:italic;color:{DIM};letter-spacing:0.18em;margin-top:0.35rem;">'
+        f'{subtitle}</div>'
+    ) if subtitle else ""
+    st.markdown(
+        f'<div style="text-align:center;padding:2rem 0 0.5rem 0;">'
+        f'<div style="font-family:{_PALATINO};font-size:2.4rem;font-weight:400;'
+        f'font-style:italic;color:{ACCENT};letter-spacing:0.01em;">{title}</div>'
+        f'{sub_html}'
+        f'</div>'
+        f'<hr style="border:none;border-top:1px solid {BORDER};margin:1rem 0 1.5rem 0;">',
+        unsafe_allow_html=True,
+    )
+
+
 def html_table(rows_html: str, head_html: str, margin_bottom: str = "1.5rem") -> str:
     """Return a styled Carbon-theme HTML table string for use with st.markdown."""
     return (

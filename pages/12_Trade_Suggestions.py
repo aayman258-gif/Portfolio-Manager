@@ -21,13 +21,12 @@ from calculations.options_recommender import OptionsRecommender
 from calculations.probability_utils import probability_of_profit, expected_value
 from calculations.regime_detector import RegimeDetector
 from data.market_data import MarketDataLoader
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, regime_color
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, regime_color, page_header
 
 st.set_page_config(page_title="Trade Suggestions", page_icon="💡", layout="wide")
 apply_carbon_theme()
 
-st.title("💡 Trade Suggestions")
-st.markdown("**Section 12:** Algorithm-scored strategy recommendations based on IV rank, regime & direction")
+page_header("💡 Trade Suggestions", "Algorithm-scored strategy recommendations based on IV rank, regime & direction")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants

@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
 
 from calculations.options_analytics import OptionsAnalytics
 from calculations.options_recommender import OptionsRecommender
@@ -31,8 +31,7 @@ st.set_page_config(
 )
 apply_carbon_theme()
 
-st.title("📊 Options Analytics & Trading")
-st.markdown("**Section 6:** Analyze options positions with Greeks and get regime-aware recommendations")
+page_header("📊 Options Analytics & Trading", "Analyze options positions with Greeks and get regime-aware recommendations")
 
 # Initialize
 options_calc = OptionsAnalytics(risk_free_rate=0.045)

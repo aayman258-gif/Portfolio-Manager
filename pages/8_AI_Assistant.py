@@ -23,7 +23,7 @@ from openai import OpenAI
 # Add parent directory to path (same pattern as other pages)
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
 
 from calculations.optimizer import RegimeAwareOptimizer
 from calculations.regime_detector import RegimeDetector
@@ -603,8 +603,7 @@ def _render_sidebar() -> None:
 # ─── Main ─────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    st.title("🤖 AI Portfolio Assistant")
-    st.markdown("Ask me about your portfolio, regime, optimization, or new position ideas.")
+    page_header("🤖 AI Portfolio Assistant", "Ask me about your portfolio, regime, optimization, or new position ideas.")
 
     _render_sidebar()
     _init_chat()

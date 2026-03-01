@@ -16,7 +16,7 @@ import yfinance as yf
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, GAIN, LOSS
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, GAIN, LOSS, page_header
 
 from calculations.regime_detector import RegimeDetector
 from calculations.scoring_engine import ScoringEngine
@@ -33,8 +33,7 @@ st.set_page_config(
 )
 apply_carbon_theme()
 
-st.title("🎯 Action Dashboard")
-st.markdown("**What should I do today?**")
+page_header("🎯 Action Dashboard", "What should I do today?")
 
 # Check if portfolio exists
 if 'positions' not in st.session_state:

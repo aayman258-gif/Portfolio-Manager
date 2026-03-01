@@ -17,7 +17,7 @@ from data.options_data import OptionsDataLoader
 from calculations.options_analytics import OptionsAnalytics
 from calculations.regime_detector import RegimeDetector
 from data.market_data import MarketDataLoader
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
 
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -27,8 +27,7 @@ st.set_page_config(
 )
 apply_carbon_theme()
 
-st.title("🛡️ Portfolio Hedge Analyzer")
-st.markdown("**Section 9:** Build options-based downside protection from the live chain, with full scenario analysis")
+page_header("🛡️ Portfolio Hedge Analyzer", "Build options-based downside protection from the live chain, with full scenario analysis")
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 options_loader = OptionsDataLoader()

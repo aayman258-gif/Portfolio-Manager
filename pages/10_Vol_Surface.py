@@ -14,13 +14,12 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent))
 
 from data.options_data import OptionsDataLoader
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
 
 st.set_page_config(page_title="Vol Surface", page_icon="🌋", layout="wide")
 apply_carbon_theme()
 
-st.title("🌋 Volatility Surface")
-st.markdown("**Section 10:** Visualize implied volatility across all strikes and expirations")
+page_header("🌋 Volatility Surface", "Visualize implied volatility across all strikes and expirations")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Sidebar

@@ -14,13 +14,12 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent))
 
 from data.options_data import OptionsDataLoader
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
 
 st.set_page_config(page_title="Options Flow", page_icon="🌊", layout="wide")
 apply_carbon_theme()
 
-st.title("🌊 Options Flow")
-st.markdown("**Section 11:** Surface unusual options activity and potentially informed trades")
+page_header("🌊 Options Flow", "Surface unusual options activity and potentially informed trades")
 
 options_loader = OptionsDataLoader()
 

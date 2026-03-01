@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT, CARD
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT, CARD, page_header
 
 from calculations.optimizer import RegimeAwareOptimizer
 from calculations.regime_detector import RegimeDetector
@@ -29,8 +29,7 @@ st.set_page_config(
 )
 apply_carbon_theme()
 
-st.title("⚖️ Portfolio Optimization & Rebalancing")
-st.markdown("**Section 4:** Generate regime-aware optimal allocation and rebalancing recommendations")
+page_header("⚖️ Portfolio Optimization & Rebalancing", "Generate regime-aware optimal allocation and rebalancing recommendations")
 
 # Check if portfolio exists
 if 'positions' not in st.session_state:

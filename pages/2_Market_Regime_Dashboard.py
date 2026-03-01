@@ -15,7 +15,7 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from calculations.regime_detector import RegimeDetector
 from data.market_data import MarketDataLoader
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
 from utils.theme import chart_style_toggle
 
 
@@ -80,8 +80,7 @@ st.set_page_config(
 )
 apply_carbon_theme()
 
-st.title("🌍 Market Regime Dashboard")
-st.markdown("**Section 2:** Detect current market regime and display macro indicators")
+page_header("🌍 Market Regime Dashboard", "Detect current market regime and display macro indicators")
 
 # Sidebar controls
 st.sidebar.header("Market Settings")

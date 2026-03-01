@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT, page_header
 
 from calculations.scoring_engine import ScoringEngine
 from calculations.regime_detector import RegimeDetector
@@ -30,8 +30,7 @@ st.set_page_config(
 )
 apply_carbon_theme()
 
-st.title("⭐ Position Scoring Engine")
-st.markdown("**Section 3:** Score each position on quant signals and fundamental metrics")
+page_header("⭐ Position Scoring Engine", "Score each position on quant signals and fundamental metrics")
 
 # Check if portfolio exists
 if 'positions' not in st.session_state:
