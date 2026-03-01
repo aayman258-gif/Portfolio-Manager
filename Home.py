@@ -670,6 +670,20 @@ elif input_method == "Upload CSV":
         except Exception as e:
             st.sidebar.error(f"Error: {str(e)}")
 
+# ── Cash Position ────────────────────────────────────────────────────────────
+st.sidebar.divider()
+st.sidebar.subheader("💵 Cash Position")
+_cash_input = st.sidebar.number_input(
+    "Cash Balance ($)",
+    min_value=0.0,
+    step=100.0,
+    format="%.2f",
+    value=float(st.session_state.get('cash_balance', 0.0)),
+    help="Enter your cash / money-market balance. Included in portfolio totals and allocation charts.",
+    key="cash_balance_input",
+)
+st.session_state['cash_balance'] = _cash_input
+
 # ── Portfolio Persistence ────────────────────────────────────────────────────
 st.sidebar.divider()
 st.sidebar.header("💾 Portfolio Persistence")
@@ -845,6 +859,11 @@ if positions_df is not None and not positions_df.empty:
     # Get portfolio summary
     summary = loader.get_portfolio_summary(position_metrics)
 
+    # Expose shared session state keys for other pages (AI assistant, optimizer, etc.)
+    _cash_balance = st.session_state.get('cash_balance', 0.0)
+    st.session_state['current_prices'] = current_prices
+    st.session_state['total_value'] = summary['total_value'] + _cash_balance
+
     # Save button
     _save_col1, _save_col2 = st.columns([5, 1])
     with _save_col2:
@@ -881,23 +900,31 @@ if positions_df is not None and not positions_df.empty:
     except Exception:
         pass
 
-    col1, col2, col3 = st.columns(3)
+    col1, col2, col3, col4 = st.columns(4)
 
     with col1:
         st.metric(
-            "Portfolio Value",
+            "Equities Value",
             f"${summary['total_value']:,.2f}",
             f"{summary['total_pnl_pct']:+.2f}% all-time"
         )
 
     with col2:
         st.metric(
+            "Cash Balance",
+            f"${_cash_balance:,.2f}",
+            f"{_cash_balance / (summary['total_value'] + _cash_balance) * 100:.1f}% of portfolio"
+            if (summary['total_value'] + _cash_balance) > 0 else "—"
+        )
+
+    with col3:
+        st.metric(
             "Day's P&L",
             f"${_day_pnl:,.2f}",
             f"{_day_pnl_pct:+.2f}%"
         )
 
-    with col3:
+    with col4:
         st.metric(
             "Positions",
             summary['num_positions'],
@@ -956,6 +983,19 @@ if positions_df is not None and not positions_df.empty:
             f'    {_pct_sign}{_pnl_pct:.2f}%'
             f'  </span>'
             f'</td>'
+            f'</tr>'
+        )
+
+    # Cash row
+    if _cash_balance > 0:
+        _rows_html += (
+            f'<tr>'
+            f'<td style="{_td.format(align="left")}; color:{_H_ACCENT}; font-style:italic;">CASH</td>'
+            f'<td style="{_td.format(align="right")}; color:{_H_DIM};">—</td>'
+            f'<td style="{_td.format(align="right")}; color:{_H_DIM};">—</td>'
+            f'<td style="{_td.format(align="right")}; color:{_H_DIM};">—</td>'
+            f'<td style="{_td.format(align="right")}">${_cash_balance:,.2f}</td>'
+            f'<td style="{_td.format(align="right")}; color:{_H_DIM};">—</td>'
             f'</tr>'
         )
 
@@ -2129,7 +2169,7 @@ if _holdings_charts_slot is not None and position_metrics is not None:
             )
 
             if _pie_view == "Portfolio Holdings":
-                # Stock slices + one Options bucket
+                # Stock slices + one Options bucket + Cash bucket
                 _pie_labels = list(position_metrics['ticker'])
                 _pie_vals   = list(position_metrics['current_value'])
                 _pie_colors = [_HOLDING_COLORS[i % len(_HOLDING_COLORS)]
@@ -2138,6 +2178,11 @@ if _holdings_charts_slot is not None and position_metrics is not None:
                     _pie_labels.append("Options")
                     _pie_vals.append(_opt_total_val)
                     _pie_colors.append('#f59e0b')   # amber bucket
+                _cb_pie = st.session_state.get('cash_balance', 0.0)
+                if _cb_pie > 0:
+                    _pie_labels.append("CASH")
+                    _pie_vals.append(_cb_pie)
+                    _pie_colors.append('#4ade80')   # green for cash
 
                 fig_pie = go.Figure(data=[go.Pie(
                     labels=_pie_labels, values=_pie_vals, hole=0.3,
