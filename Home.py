@@ -228,19 +228,32 @@ h1 {{
     margin-bottom: 0.8rem !important;
 }}
 
-/* ── Section labels (h3) — Paper Trading: small uppercase, dim, spaced ── */
+/* ── Section headers (h3) — italic serif, cyan ──────────────────────── */
 [data-testid="stHeadingWithActionElements"] h3 {{
     font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, serif !important;
-    font-size: 0.68rem !important;
-    font-weight: 500 !important;
-    font-style: normal !important;
-    text-transform: uppercase !important;
-    letter-spacing: 0.40em !important;
-    color: {_H_DIM} !important;
+    font-size: 1.1rem !important;
+    font-weight: 400 !important;
+    font-style: italic !important;
+    text-transform: none !important;
+    letter-spacing: 0 !important;
+    color: {_H_ACCENT} !important;
     border-left: none !important;
     padding-left: 0 !important;
     margin-top: 1.8rem !important;
-    margin-bottom: 1rem !important;
+    margin-bottom: 0.8rem !important;
+}}
+
+/* ── Inline markdown h4 headers — italic serif, cyan, slightly smaller ── */
+[data-testid="stMarkdownContainer"] h4 {{
+    font-family: 'Palatino Linotype', 'Book Antiqua', Palatino, serif !important;
+    font-size: 0.95rem !important;
+    font-weight: 400 !important;
+    font-style: italic !important;
+    color: {_H_ACCENT} !important;
+    letter-spacing: 0 !important;
+    text-transform: none !important;
+    margin-top: 1.2rem !important;
+    margin-bottom: 0.5rem !important;
 }}
 
 /* ── Metric cards ────────────────────────────────────────────────────── */
@@ -668,6 +681,10 @@ if portfolio_file_exists():
         if loaded is not None:
             st.session_state['positions'] = loaded
             st.session_state['manual_positions'] = loaded.to_dict(orient='records')
+            # Also restore options positions from the same file
+            _reloaded_opts = load_options_positions()
+            if _reloaded_opts:
+                st.session_state['options_positions'] = _reloaded_opts
             st.sidebar.success(f"Loaded {len(loaded)} positions!")
             st.rerun()
         else:
@@ -935,14 +952,81 @@ if positions_df is not None and not positions_df.empty:
         )
 
     _table_html = f"""
-    <div style="overflow-x:auto; margin-bottom:1.5rem;">
-    <table style="width:100%; border-collapse:collapse;">
-      <thead><tr>{_head_html}</tr></thead>
-      <tbody>{_rows_html}</tbody>
-    </table>
+    <div style="border-radius:8px; overflow:hidden; border:1px solid {_H_BORDER}; margin-bottom:1.5rem;">
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr>{_head_html}</tr></thead>
+          <tbody>{_rows_html}</tbody>
+        </table>
+      </div>
     </div>
     """
     st.markdown(_table_html, unsafe_allow_html=True)
+
+    # ── Update Positions ──────────────────────────────────────────────────
+    with st.expander("✏️ Update Positions"):
+        for _up_idx, _up_row in positions_df.iterrows():
+            _up_ticker  = _up_row['ticker']
+            _up_shares  = float(_up_row['shares'])
+            _up_cost    = float(_up_row['cost_basis'])
+            st.markdown(
+                f"<span style='font-family:Palatino Linotype,serif; font-size:0.88rem; "
+                f"color:{_H_ACCENT}; font-style:italic;'>{_up_ticker}</span>"
+                f"<span style='color:{_H_DIM}; font-size:0.78rem;'> — "
+                f"{_up_shares:,.4g} shares @ ${_up_cost:.2f}</span>",
+                unsafe_allow_html=True,
+            )
+            _uc1, _uc2, _uc3, _uc4 = st.columns([2, 2, 2, 1])
+            with _uc1:
+                _up_action = st.selectbox(
+                    "Action", ["Buy More", "Sell Shares"],
+                    key=f"_upd_act_{_up_ticker}_{_up_idx}",
+                    label_visibility="collapsed",
+                )
+            with _uc2:
+                _up_qty = st.number_input(
+                    "Shares", min_value=0.0001, step=1.0, format="%.4g",
+                    key=f"_upd_qty_{_up_ticker}_{_up_idx}",
+                    label_visibility="collapsed",
+                )
+            with _uc3:
+                _up_price = st.number_input(
+                    "Price / Share ($)", min_value=0.0001, step=0.01,
+                    value=float(_up_cost), format="%.2f",
+                    key=f"_upd_price_{_up_ticker}_{_up_idx}",
+                    label_visibility="collapsed",
+                )
+            with _uc4:
+                if st.button("Apply", key=f"_upd_apply_{_up_ticker}_{_up_idx}", type="primary"):
+                    _manual = st.session_state.get('manual_positions', [])
+                    for _mp in _manual:
+                        if _mp['ticker'] == _up_ticker:
+                            if _up_action == "Buy More":
+                                _new_total = _up_shares + _up_qty
+                                _mp['cost_basis'] = (
+                                    (_up_shares * _up_cost + _up_qty * _up_price) / _new_total
+                                )
+                                _mp['shares'] = _new_total
+                            else:  # Sell Shares
+                                _remaining = _up_shares - _up_qty
+                                if _remaining <= 0:
+                                    _manual = [p for p in _manual if p['ticker'] != _up_ticker]
+                                else:
+                                    _mp['shares'] = _remaining
+                                    # cost basis unchanged on partial sell
+                            break
+                    st.session_state['manual_positions'] = _manual
+                    _upd_df = pd.DataFrame(_manual) if _manual else pd.DataFrame()
+                    if not _upd_df.empty:
+                        st.session_state['positions'] = _upd_df
+                        save_portfolio(_upd_df)
+                    else:
+                        st.session_state.pop('positions', None)
+                    st.rerun()
+            st.markdown(
+                f"<hr style='border:none; border-top:1px solid {_H_BORDER}; margin:0.5rem 0;'>",
+                unsafe_allow_html=True,
+            )
 
     # Reserve slots filled below after options data is computed
     _opts_tbl_slot  = st.container()   # single-leg options table
@@ -1769,11 +1853,13 @@ if _singles:
             f'</tr>'
         )
     _o_tbl_html = f"""
-    <div style="overflow-x:auto; margin-bottom:1rem;">
-    <table style="width:100%; border-collapse:collapse;">
-      <thead><tr>{_o_head_html}</tr></thead>
-      <tbody>{_o_rows_html}</tbody>
-    </table>
+    <div style="border-radius:8px; overflow:hidden; border:1px solid {_H_BORDER}; margin-bottom:1rem;">
+      <div style="overflow-x:auto;">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead><tr>{_o_head_html}</tr></thead>
+          <tbody>{_o_rows_html}</tbody>
+        </table>
+      </div>
     </div>
     """
     # Render inside the pre-positioned slot (between Position Details and Holdings Breakdown)

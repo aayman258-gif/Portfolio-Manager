@@ -14,15 +14,22 @@ _STORE_PATH = Path.home() / ".portfolio_manager" / "portfolio.json"
 
 
 def save_portfolio(positions_df: pd.DataFrame) -> bool:
-    """Save portfolio positions to JSON file. Returns True on success."""
+    """Save portfolio positions to JSON file. Returns True on success.
+    Preserves any existing options_positions data in the file."""
     try:
         _STORE_PATH.parent.mkdir(parents=True, exist_ok=True)
-        data = {
-            "saved_at": datetime.now().isoformat(),
-            "positions": positions_df.to_dict(orient="records")
-        }
+        # Preserve existing data (e.g. options_positions) before overwriting
+        existing: dict = {}
+        if _STORE_PATH.exists():
+            try:
+                with open(_STORE_PATH, "r") as f:
+                    existing = json.load(f)
+            except Exception:
+                pass
+        existing["saved_at"] = datetime.now().isoformat()
+        existing["positions"] = positions_df.to_dict(orient="records")
         with open(_STORE_PATH, "w") as f:
-            json.dump(data, f, indent=2, default=str)
+            json.dump(existing, f, indent=2, default=str)
         return True
     except Exception as e:
         print(f"Error saving portfolio: {e}")
