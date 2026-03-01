@@ -14,10 +14,10 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent))
 
 from data.options_data import OptionsDataLoader
-from utils.theme import apply_dark_theme, dark_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
 
 st.set_page_config(page_title="Options Flow", page_icon="🌊", layout="wide")
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("🌊 Options Flow")
 st.markdown("**Section 11:** Surface unusual options activity and potentially informed trades")
@@ -215,19 +215,19 @@ fig_bar = go.Figure()
 fig_bar.add_trace(go.Bar(
     x=[summary['total_call_prem']], y=['Flow'],
     orientation='h', name='Call Premium',
-    marker_color='#00d4aa',
+    marker_color='#22d3ee',
     text=f"${summary['total_call_prem']/1e6:.1f}M calls",
     textposition='inside', insidetextanchor='start'
 ))
 fig_bar.add_trace(go.Bar(
     x=[summary['total_put_prem']], y=['Flow'],
     orientation='h', name='Put Premium',
-    marker_color='#ef4444',
+    marker_color='#fb7185',
     text=f"${summary['total_put_prem']/1e6:.1f}M puts",
     textposition='inside', insidetextanchor='end'
 ))
 fig_bar.update_layout(
-    **dark_plotly_layout(
+    **carbon_plotly_layout(
         height=120, barmode='stack',
         xaxis_title="Dollar Premium ($)",
         showlegend=True,
@@ -244,10 +244,10 @@ st.plotly_chart(fig_bar, use_container_width=True)
 # Interpretation
 if ratio > 0.65:
     interp = "**Call-dominated flow** — Majority of dollar premium is in calls. Bullish bias."
-    interp_color = "#22c55e"
+    interp_color = "#22d3ee"
 elif ratio < 0.35:
     interp = "**Put-dominated flow** — Majority of dollar premium is in puts. Bearish/protective bias."
-    interp_color = "#ef4444"
+    interp_color = "#fb7185"
 else:
     interp = "**Balanced flow** — Roughly equal call and put premium. No strong directional bias."
     interp_color = "#f59e0b"
@@ -276,7 +276,7 @@ display_df['Dollar Premium'] = display_df['Dollar Premium'].apply(
 )
 
 def _row_style(row):
-    base_color = '#00332a' if row['Type'] == 'Call' else '#2d1a1a'
+    base_color = '#0a1c22' if row['Type'] == 'Call' else '#1c0a12'
     return [f'background-color: {base_color}'] * len(row)
 
 styled_table = (
@@ -304,8 +304,8 @@ st.subheader("🏆 Top 10 Largest Trades by Dollar Premium")
 top10 = flow_df.head(10).copy()
 
 for rank, (_, row) in enumerate(top10.iterrows(), 1):
-    type_color  = '#00d4aa' if row['Type'] == 'Call' else '#ef4444'
-    side_color  = '#22c55e' if row['Side'] == 'Bought' else '#f59e0b'
+    type_color  = '#22d3ee' if row['Type'] == 'Call' else '#fb7185'
+    side_color  = '#22d3ee' if row['Side'] == 'Bought' else '#f59e0b'
     dollar_str  = (f"${row['Dollar Premium']/1_000:.1f}K"
                    if row['Dollar Premium'] < 1_000_000
                    else f"${row['Dollar Premium']/1_000_000:.2f}M")
@@ -314,20 +314,20 @@ for rank, (_, row) in enumerate(top10.iterrows(), 1):
                   else "New OI")
 
     st.markdown(
-        f"""<div style="background:#141720;border:1px solid rgba(0,212,170,0.15);
+        f"""<div style="background:#1a1a1a;border:1px solid rgba(34,211,238,0.15);
         border-radius:10px;padding:12px 18px;margin-bottom:8px;display:flex;
         align-items:center;gap:16px;">
-        <span style="font-size:22px;font-weight:700;color:#6b7a8f;min-width:32px">#{rank}</span>
+        <span style="font-size:22px;font-weight:700;color:#888888;min-width:32px">#{rank}</span>
         <span style="background:{type_color}22;color:{type_color};padding:2px 10px;
         border-radius:12px;font-weight:700;font-size:13px;">{row['Type'].upper()}</span>
         <span style="background:{side_color}22;color:{side_color};padding:2px 10px;
         border-radius:12px;font-weight:600;font-size:13px;">{row['Side']}</span>
-        <span style="font-weight:700;font-size:15px;color:#e8edf3;">
+        <span style="font-weight:700;font-size:15px;color:#ffffff;">
             ${row['Strike']:.0f} strike — {row['Expiry']} ({row['DTE']}d)
         </span>
         <span style="margin-left:auto;text-align:right;">
-            <span style="font-size:18px;font-weight:700;color:#e8edf3;">{dollar_str}</span>
-            <span style="font-size:12px;color:#8b9ab0;margin-left:8px;">
+            <span style="font-size:18px;font-weight:700;color:#ffffff;">{dollar_str}</span>
+            <span style="font-size:12px;color:#888888;margin-left:8px;">
                 Vol {row['Volume']:,} / OI {row['OI']:,} ({vol_oi_str})
                 &nbsp;|&nbsp; IV {row['IV (%)']:.1f}%
             </span>
@@ -367,11 +367,11 @@ if not flow_df.empty and 'Underlying' in flow_df.columns:
             z=pivot_vals,
             colorscale='Plasma',
             colorbar=dict(title="$K Premium", tickprefix="$",
-                          ticksuffix="K", tickfont=dict(color='#e8edf3')),
+                          ticksuffix="K", tickfont=dict(color='#ffffff')),
             hovertemplate="Strike: %{x}<br>Expiry: %{y}<br>Premium: $%{z:,.0f}K<extra></extra>",
         ))
         heat_fig.update_layout(
-            **dark_plotly_layout(
+            **carbon_plotly_layout(
                 height=max(300, len(pivot) * 50 + 120),
                 title=f"{ticker} Dollar Premium Heatmap (Strike % of Spot × Expiration)",
                 xaxis_title="Strike (% of Spot)",

@@ -14,7 +14,7 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.theme import apply_dark_theme
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT
 
 from calculations.scoring_engine import ScoringEngine
 from calculations.regime_detector import RegimeDetector
@@ -28,7 +28,7 @@ st.set_page_config(
     page_icon="⭐",
     layout="wide"
 )
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("⭐ Position Scoring Engine")
 st.markdown("**Section 3:** Score each position on quant signals and fundamental metrics")
@@ -175,15 +175,15 @@ if scores_data:
     # Style the dataframe
     def color_score(val):
         if val >= 80:
-            return 'background-color: lightgreen'
+            return 'background-color: rgba(34,211,238,0.30); color: #ffffff'
         elif val >= 65:
-            return 'background-color: #90EE90'
+            return 'background-color: rgba(34,211,238,0.15); color: #ffffff'
         elif val >= 50:
-            return 'background-color: lightyellow'
+            return 'background-color: rgba(245,158,11,0.15); color: #ffffff'
         elif val >= 35:
-            return 'background-color: #FFB366'
+            return 'background-color: rgba(251,146,60,0.20); color: #ffffff'
         else:
-            return 'background-color: #FFB3B3'
+            return 'background-color: rgba(251,113,133,0.25); color: #ffffff'
 
     styled_df = display_df.style.format({
         'Unified Score': '{:.1f}',
@@ -217,13 +217,12 @@ if scores_data:
             marker_color=colors_list
         )])
 
-        fig_scores.update_layout(
+        fig_scores.update_layout(**carbon_plotly_layout(
             title="Unified Scores by Position",
             xaxis_title="Ticker",
             yaxis_title="Score (0-100)",
             height=400,
-            template='plotly_dark'
-        )
+        ))
 
         fig_scores.add_hline(y=80, line_dash="dash", line_color="green", opacity=0.5)
         fig_scores.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.5)
@@ -247,13 +246,12 @@ if scores_data:
             )
         )])
 
-        fig_scatter.update_layout(
+        fig_scatter.update_layout(**carbon_plotly_layout(
             title="Quant vs Fundamental Scores",
             xaxis_title="Quant Score",
             yaxis_title="Fundamental Score",
             height=400,
-            template='plotly_dark'
-        )
+        ))
 
         fig_scatter.add_hline(y=50, line_dash="dash", line_color="gray", opacity=0.3)
         fig_scatter.add_vline(x=50, line_dash="dash", line_color="gray", opacity=0.3)
@@ -314,16 +312,11 @@ if scores_data:
         line_color='blue'
     ))
 
-    fig_radar.update_layout(
-        polar=dict(
-            radialaxis=dict(
-                visible=True,
-                range=[0, 100]
-            )
-        ),
+    fig_radar.update_layout(**carbon_plotly_layout(
+        polar=dict(radialaxis=dict(visible=True, range=[0, 100])),
         showlegend=False,
-        height=400
-    )
+        height=400,
+    ))
 
     st.plotly_chart(fig_radar, use_container_width=True)
 
@@ -368,7 +361,7 @@ if scores_data:
     if trends:
         st.markdown("### 📈 Fundamental Trends")
         _icons  = {'up': '↑', 'down': '↓', 'flat': '→'}
-        _colors = {'up': '#00d4aa', 'down': '#FF6B6B', 'flat': '#aaaaaa'}
+        _colors = {'up': '#22d3ee', 'down': '#fb7185', 'flat': '#888888'}
         trend_cols = st.columns(max(len(trends), 1))
         for idx, (metric, direction) in enumerate(trends.items()):
             icon  = _icons.get(direction, '→')

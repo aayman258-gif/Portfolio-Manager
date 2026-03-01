@@ -13,7 +13,7 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.theme import apply_dark_theme
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT, CARD
 
 from calculations.optimizer import RegimeAwareOptimizer
 from calculations.regime_detector import RegimeDetector
@@ -27,7 +27,7 @@ st.set_page_config(
     page_icon="⚖️",
     layout="wide"
 )
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("⚖️ Portfolio Optimization & Rebalancing")
 st.markdown("**Section 4:** Generate regime-aware optimal allocation and rebalancing recommendations")
@@ -217,7 +217,7 @@ if 'optimization_result' in st.session_state:
             title="Current Allocation"
         )])
 
-        fig_current.update_layout(height=400)
+        fig_current.update_layout(**carbon_plotly_layout(height=400))
         st.plotly_chart(fig_current, use_container_width=True)
 
     with col2:
@@ -227,10 +227,10 @@ if 'optimization_result' in st.session_state:
             values=[v*100 for v in result['weights'].values()],
             hole=0.3,
             title="Optimal Allocation",
-            marker=dict(colors=['#00CC00' if k == 'CASH' else None for k in result['weights'].keys()])
+            marker=dict(colors=[ACCENT if k == 'CASH' else None for k in result['weights'].keys()])
         )])
 
-        fig_optimal.update_layout(height=400)
+        fig_optimal.update_layout(**carbon_plotly_layout(height=400))
         st.plotly_chart(fig_optimal, use_container_width=True)
 
     # Bar chart comparison
@@ -244,24 +244,23 @@ if 'optimization_result' in st.session_state:
         name='Current',
         x=comparison_no_cash['Ticker'],
         y=comparison_no_cash['Current %'],
-        marker_color='lightblue'
+        marker_color='rgba(34,211,238,0.45)'
     ))
 
     fig_bar.add_trace(go.Bar(
         name='Optimal',
         x=comparison_no_cash['Ticker'],
         y=comparison_no_cash['Optimal %'],
-        marker_color='darkblue'
+        marker_color='rgba(34,211,238,0.90)'
     ))
 
-    fig_bar.update_layout(
+    fig_bar.update_layout(**carbon_plotly_layout(
         barmode='group',
         title="Current vs. Optimal Weights",
         xaxis_title="Ticker",
         yaxis_title="Weight (%)",
         height=400,
-        template='plotly_dark'
-    )
+    ))
 
     st.plotly_chart(fig_bar, use_container_width=True)
 
@@ -386,7 +385,7 @@ if 'optimization_result' in st.session_state:
                 col_div, col_heat = st.columns([1, 3])
 
                 with col_div:
-                    score_color = "#00d4aa" if diversif_score >= 60 else "#FFB366" if diversif_score >= 40 else "#FF6B6B"
+                    score_color = "#22d3ee" if diversif_score >= 60 else "#f59e0b" if diversif_score >= 40 else "#fb7185"
                     label_text  = "Good" if diversif_score >= 60 else "Moderate" if diversif_score >= 40 else "Poor"
                     st.markdown(
                         f"<div style='text-align:center; padding:20px;'>"
@@ -417,11 +416,10 @@ if 'optimization_result' in st.session_state:
                         showscale=True,
                         colorbar=dict(title='Corr')
                     ))
-                    fig_corr.update_layout(
+                    fig_corr.update_layout(**carbon_plotly_layout(
                         title="60-Day Return Correlations",
                         height=400,
-                        template='plotly_dark'
-                    )
+                    ))
                     st.plotly_chart(fig_corr, use_container_width=True)
             else:
                 st.info("Need at least 2 tickers for correlation analysis.")

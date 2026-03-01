@@ -21,10 +21,10 @@ from calculations.options_recommender import OptionsRecommender
 from calculations.probability_utils import probability_of_profit, expected_value
 from calculations.regime_detector import RegimeDetector
 from data.market_data import MarketDataLoader
-from utils.theme import apply_dark_theme, dark_plotly_layout, regime_color
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, regime_color
 
 st.set_page_config(page_title="Trade Suggestions", page_icon="💡", layout="wide")
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("💡 Trade Suggestions")
 st.markdown("**Section 12:** Algorithm-scored strategy recommendations based on IV rank, regime & direction")
@@ -332,19 +332,19 @@ with col_ctx1:
     st.markdown(
         f'<div style="background:{rc}22;border:1px solid {rc}55;border-radius:10px;'
         f'padding:14px 18px;text-align:center;">'
-        f'<div style="font-size:11px;color:#8b9ab0;text-transform:uppercase;letter-spacing:0.08em;">Market Regime</div>'
+        f'<div style="font-size:11px;color:#888888;text-transform:uppercase;letter-spacing:0.08em;">Market Regime</div>'
         f'<div style="font-size:22px;font-weight:700;color:{rc};margin-top:4px;">{current_regime}</div>'
         f'</div>',
         unsafe_allow_html=True
     )
 
 with col_ctx2:
-    iv_color = '#ef4444' if iv_rank >= 0.70 else '#22c55e' if iv_rank <= 0.35 else '#f59e0b'
+    iv_color = '#fb7185' if iv_rank >= 0.70 else '#22d3ee' if iv_rank <= 0.35 else '#f59e0b'
     iv_label = "High — Sell Premium" if iv_rank >= 0.70 else "Low — Buy Options" if iv_rank <= 0.35 else "Moderate"
     st.markdown(
         f'<div style="background:{iv_color}15;border:1px solid {iv_color}55;border-radius:10px;'
         f'padding:14px 18px;text-align:center;">'
-        f'<div style="font-size:11px;color:#8b9ab0;text-transform:uppercase;letter-spacing:0.08em;">IV Rank</div>'
+        f'<div style="font-size:11px;color:#888888;text-transform:uppercase;letter-spacing:0.08em;">IV Rank</div>'
         f'<div style="font-size:22px;font-weight:700;color:{iv_color};margin-top:4px;">{iv_rank:.0%}</div>'
         f'<div style="font-size:11px;color:{iv_color};margin-top:2px;">{iv_label}</div>'
         f'</div>',
@@ -363,20 +363,20 @@ st.divider()
 fig_ivr = go.Figure(go.Indicator(
     mode="gauge+number",
     value=iv_rank * 100,
-    number={'suffix': '%', 'font': {'color': '#e8edf3', 'size': 28}},
+    number={'suffix': '%', 'font': {'color': '#ffffff', 'size': 28}},
     gauge={
-        'axis': {'range': [0, 100], 'tickcolor': '#8b9ab0'},
+        'axis': {'range': [0, 100], 'tickcolor': '#888888'},
         'bar':  {'color': iv_color},
         'steps': [
             {'range': [0, 35],  'color': '#1a3a1a'},
             {'range': [35, 70], 'color': '#2d2a15'},
             {'range': [70, 100],'color': '#3a1515'},
         ],
-        'threshold': {'line': {'color': '#e8edf3', 'width': 2}, 'value': iv_rank * 100}
+        'threshold': {'line': {'color': '#ffffff', 'width': 2}, 'value': iv_rank * 100}
     },
-    title={'text': 'IV Rank (1-Year)', 'font': {'color': '#e8edf3', 'size': 13}}
+    title={'text': 'IV Rank (1-Year)', 'font': {'color': '#ffffff', 'size': 13}}
 ))
-fig_ivr.update_layout(**dark_plotly_layout(height=200, margin=dict(l=20, r=20, t=50, b=10)))
+fig_ivr.update_layout(**carbon_plotly_layout(height=200, margin=dict(l=20, r=20, t=50, b=10)))
 
 col_g1, col_g2 = st.columns([1, 2])
 with col_g1:
@@ -401,17 +401,17 @@ st.divider()
 # ── Algorithm inference banner ────────────────────────────────────────────────
 if inferred_view is not None:
     view_color = {
-        'Bullish':                    '#22c55e',
-        'Bearish':                    '#ef4444',
-        'Neutral':                    '#4a9eff',
+        'Bullish':                    '#22d3ee',
+        'Bearish':                    '#fb7185',
+        'Neutral':                    '#22d3ee',
         'Volatile / Expecting Big Move': '#f59e0b',
-    }.get(inferred_view, '#6b7a8f')
+    }.get(inferred_view, '#888888')
 
     reasons_md = "\n".join(f"- {r}" for r in infer_reasons)
     st.markdown(
         f'<div style="background:{view_color}12;border:1px solid {view_color}55;'
         f'border-radius:10px;padding:14px 20px;margin-bottom:16px;">'
-        f'<div style="font-size:12px;color:#8b9ab0;text-transform:uppercase;'
+        f'<div style="font-size:12px;color:#888888;text-transform:uppercase;'
         f'letter-spacing:0.08em;margin-bottom:6px;">Algorithm Inferred View</div>'
         f'<div style="font-size:20px;font-weight:700;color:{view_color};margin-bottom:8px;">'
         f'{inferred_view}</div>'
@@ -442,16 +442,16 @@ st.markdown(f"Scored for **{ticker}** | View: **{view}** | Regime: **{current_re
 # ─────────────────────────────────────────────────────────────────────────────
 for rank, (strat_name, score, reasons) in enumerate(top3, 1):
     rank_colors = {1: '#f59e0b', 2: '#9ca3af', 3: '#cd7f32'}
-    rank_color  = rank_colors.get(rank, '#6b7a8f')
+    rank_color  = rank_colors.get(rank, '#888888')
     rank_medals = {1: '🥇', 2: '🥈', 3: '🥉'}
 
     with st.container():
         st.markdown(
-            f'<div style="background:#141720;border:1px solid {rank_color}55;'
+            f'<div style="background:#1a1a1a;border:1px solid {rank_color}55;'
             f'border-radius:12px;padding:4px 18px 2px;margin-bottom:4px;">'
             f'<span style="font-size:20px">{rank_medals[rank]}</span>'
             f' <span style="font-size:18px;font-weight:700;color:{rank_color};">#{rank}</span>'
-            f' <span style="font-size:18px;font-weight:700;color:#e8edf3;margin-left:8px;">'
+            f' <span style="font-size:18px;font-weight:700;color:#ffffff;margin-left:8px;">'
             f'{strat_name}</span>'
             f'</div>',
             unsafe_allow_html=True
@@ -521,13 +521,13 @@ for rank, (strat_name, score, reasons) in enumerate(top3, 1):
             fig_pay.add_trace(go.Scatter(
                 x=price_range, y=pnl,
                 fill='tozeroy',
-                fillcolor='rgba(0,212,170,0.08)',
-                line=dict(color='#00d4aa', width=2.5),
+                fillcolor='rgba(34,211,238,0.08)',
+                line=dict(color='#22d3ee', width=2.5),
                 name='P&L at Expiry',
                 hovertemplate="$%{x:.2f} → %{y:+,.0f}<extra></extra>"
             ))
 
-            fig_pay.add_hline(y=0, line_color='#6b7a8f', line_dash='dash', line_width=1)
+            fig_pay.add_hline(y=0, line_color='#888888', line_dash='dash', line_width=1)
             fig_pay.add_vline(x=spot, line_color='#4a9eff', line_dash='dot', line_width=1.5,
                               annotation_text=f"${spot:.2f}", annotation_font_color='#4a9eff')
 
@@ -540,7 +540,7 @@ for rank, (strat_name, score, reasons) in enumerate(top3, 1):
                 x=[summary['max_profit_price']],
                 y=[summary['max_profit']],
                 mode='markers', name='Max Profit',
-                marker=dict(color='#22c55e', size=10, symbol='star'),
+                marker=dict(color='#22d3ee', size=10, symbol='star'),
                 hovertemplate=f"Max Profit: ${mp:,.0f}<extra></extra>"
             ))
 
@@ -549,12 +549,12 @@ for rank, (strat_name, score, reasons) in enumerate(top3, 1):
                     x=[summary['max_loss_price']],
                     y=[summary['max_loss']],
                     mode='markers', name='Max Loss',
-                    marker=dict(color='#ef4444', size=10, symbol='x'),
+                    marker=dict(color='#fb7185', size=10, symbol='x'),
                     hovertemplate=f"Max Loss: ${ml:,.0f}<extra></extra>"
                 ))
 
             fig_pay.update_layout(
-                **dark_plotly_layout(
+                **carbon_plotly_layout(
                     height=320,
                     title=f"{strat_name} Payoff at Expiration ({actual_dte}d)",
                     xaxis_title="Underlying Price",

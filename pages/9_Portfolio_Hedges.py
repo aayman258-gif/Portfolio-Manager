@@ -17,7 +17,7 @@ from data.options_data import OptionsDataLoader
 from calculations.options_analytics import OptionsAnalytics
 from calculations.regime_detector import RegimeDetector
 from data.market_data import MarketDataLoader
-from utils.theme import apply_dark_theme, dark_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
 
 # ─────────────────────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -25,7 +25,7 @@ st.set_page_config(
     page_icon="🛡️",
     layout="wide"
 )
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("🛡️ Portfolio Hedge Analyzer")
 st.markdown("**Section 9:** Build options-based downside protection from the live chain, with full scenario analysis")
@@ -54,10 +54,10 @@ def get_spy_options(expiration):
 current_regime = get_regime()
 
 regime_colors = {
-    'Low Vol': '#22c55e', 'High Vol': '#ef4444',
-    'Trending': '#4a9eff', 'Mean Reversion': '#f59e0b', 'Unknown': '#6b7a8f'
+    'Low Vol': '#22d3ee', 'High Vol': '#fb7185',
+    'Trending': '#22d3ee', 'Mean Reversion': '#f59e0b', 'Unknown': '#888888'
 }
-rcolor = regime_colors.get(current_regime, '#6b7a8f')
+rcolor = regime_colors.get(current_regime, '#888888')
 st.markdown(
     f"""<div style="background:{rcolor}22;border:1px solid {rcolor}55;border-radius:8px;
     padding:10px 18px;margin-bottom:12px;font-size:15px;">
@@ -305,20 +305,20 @@ fig_scen = go.Figure()
 
 # Shaded region below 0
 fig_scen.add_hrect(y0=-portfolio_value * 0.4, y1=0,
-                   fillcolor='rgba(239,68,68,0.04)', line_width=0)
+                   fillcolor='rgba(251,113,133,0.04)', line_width=0)
 
 # Unhedged
 fig_scen.add_trace(go.Scatter(
     x=move_pcts, y=unhedged_pnl,
     name='Unhedged Portfolio', mode='lines',
-    line=dict(color='#6b7a8f', width=2, dash='dot')
+    line=dict(color='#888888', width=2, dash='dot')
 ))
 
 # Protective Put
 fig_scen.add_trace(go.Scatter(
     x=move_pcts, y=pp_total,
     name=f'Protective Put (${put_K:.0f})', mode='lines',
-    line=dict(color='#ef4444', width=2.5)
+    line=dict(color='#fb7185', width=2.5)
 ))
 
 # Put Spread
@@ -332,14 +332,14 @@ fig_scen.add_trace(go.Scatter(
 fig_scen.add_trace(go.Scatter(
     x=move_pcts, y=collar_total,
     name=f'Collar ({put_K:.0f}p / {call_K:.0f}c)', mode='lines',
-    line=dict(color='#4a9eff', width=2.5)
+    line=dict(color='#22d3ee', width=2.5)
 ))
 
 fig_scen.add_hline(y=0, line_color='#ffffff', line_width=1, line_dash='dash')
-fig_scen.add_vline(x=0,  line_color='#6b7a8f', line_width=1, line_dash='dot')
+fig_scen.add_vline(x=0,  line_color='#888888', line_width=1, line_dash='dot')
 
 fig_scen.update_layout(
-    **dark_plotly_layout(
+    **carbon_plotly_layout(
         height=520,
         title="Portfolio P&L vs SPY Move — All Hedge Strategies",
         xaxis_title="SPY Move (%)",
@@ -384,7 +384,7 @@ scen_df = pd.DataFrame(scen_rows)
 def _color_pnl(val):
     try:
         v = float(val.replace('$', '').replace(',', ''))
-        return f'color: {"#22c55e" if v >= 0 else "#ef4444"}'
+        return f'color: {"#22d3ee" if v >= 0 else "#fb7185"}'
     except Exception:
         return ''
 

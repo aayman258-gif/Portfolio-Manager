@@ -14,10 +14,10 @@ from datetime import datetime
 sys.path.append(str(Path(__file__).parent.parent))
 
 from data.options_data import OptionsDataLoader
-from utils.theme import apply_dark_theme, dark_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
 
 st.set_page_config(page_title="Vol Surface", page_icon="🌋", layout="wide")
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("🌋 Volatility Surface")
 st.markdown("**Section 10:** Visualize implied volatility across all strikes and expirations")
@@ -190,7 +190,7 @@ with tab1:
             y=dtes,
             z=iv_pct,
             colorscale='Viridis',
-            colorbar=dict(title="IV %", ticksuffix="%", tickfont=dict(color='#e8edf3')),
+            colorbar=dict(title="IV %", ticksuffix="%", tickfont=dict(color='#ffffff')),
             hovertemplate=(
                 "Strike: %{x:.1f}%<br>"
                 "DTE: %{y}d<br>"
@@ -198,17 +198,17 @@ with tab1:
             )
         ))
         fig.update_layout(
-            **dark_plotly_layout(
+            **carbon_plotly_layout(
                 height=620,
                 title=f"{ticker} Implied Volatility Surface",
                 scene=dict(
                     xaxis=dict(title="Strike %", ticksuffix="%",
-                               gridcolor='rgba(107,122,143,0.2)', color='#e8edf3'),
+                               gridcolor='rgba(107,122,143,0.2)', color='#ffffff'),
                     yaxis=dict(title="Days to Expiry",
-                               gridcolor='rgba(107,122,143,0.2)', color='#e8edf3'),
+                               gridcolor='rgba(107,122,143,0.2)', color='#ffffff'),
                     zaxis=dict(title="IV %", ticksuffix="%",
-                               gridcolor='rgba(107,122,143,0.2)', color='#e8edf3'),
-                    bgcolor='#0e1117',
+                               gridcolor='rgba(107,122,143,0.2)', color='#ffffff'),
+                    bgcolor='#111111',
                 ),
                 margin=dict(l=0, r=0, t=50, b=0),
             )
@@ -219,14 +219,14 @@ with tab1:
             y=[f"{d}d" for d in dtes],
             z=iv_pct,
             colorscale='Viridis',
-            colorbar=dict(title="IV %", ticksuffix="%", tickfont=dict(color='#e8edf3')),
+            colorbar=dict(title="IV %", ticksuffix="%", tickfont=dict(color='#ffffff')),
             hovertemplate="Strike: %{x}<br>DTE: %{y}<br>IV: %{z:.1f}%<extra></extra>",
             text=np.round(iv_pct, 1),
             texttemplate="%{text:.1f}%",
             textfont=dict(size=10)
         ))
         fig.update_layout(
-            **dark_plotly_layout(
+            **carbon_plotly_layout(
                 height=max(300, len(dtes) * 45 + 120),
                 title=f"{ticker} IV Heatmap (Strike % vs DTE)",
                 xaxis_title="Strike (% of Spot)",
@@ -235,8 +235,8 @@ with tab1:
         )
         # Vertical line at ATM
         fig.add_vline(x=_STRIKE_LABELS[atm_idx],
-                      line_color='#00d4aa', line_dash='dash', line_width=1.5,
-                      annotation_text="ATM", annotation_font_color='#00d4aa')
+                      line_color='#22d3ee', line_dash='dash', line_width=1.5,
+                      annotation_text="ATM", annotation_font_color='#22d3ee')
 
     st.plotly_chart(fig, use_container_width=True)
 
@@ -261,8 +261,8 @@ with tab2:
         x=dtes, y=atm_ivs,
         mode='lines+markers',
         name='ATM IV',
-        line=dict(color='#00d4aa', width=2.5),
-        marker=dict(size=8, color='#00d4aa'),
+        line=dict(color='#22d3ee', width=2.5),
+        marker=dict(size=8, color='#22d3ee'),
         hovertemplate="DTE: %{x}d<br>ATM IV: %{y:.1f}%<extra></extra>"
     ))
 
@@ -272,15 +272,15 @@ with tab2:
             ts_fig.add_annotation(
                 x=dte, y=iv,
                 text=f"{iv:.1f}%",
-                showarrow=True, arrowhead=2, arrowcolor='#00d4aa',
-                font=dict(color='#e8edf3', size=10),
+                showarrow=True, arrowhead=2, arrowcolor='#22d3ee',
+                font=dict(color='#ffffff', size=10),
                 bgcolor='rgba(20,23,32,0.85)',
                 bordercolor='rgba(0,212,170,0.3)',
                 ay=-30
             )
 
     ts_fig.update_layout(
-        **dark_plotly_layout(
+        **carbon_plotly_layout(
             height=420,
             title=f"{ticker} ATM IV Term Structure",
             xaxis_title="Days to Expiry",
@@ -328,7 +328,7 @@ with tab3:
 
     skews = iv_pct[:, put_95_idx] - iv_pct[:, call_105_idx]
 
-    bar_colors = ['#22c55e' if s >= 0 else '#f59e0b' for s in skews]
+    bar_colors = ['#22d3ee' if s >= 0 else '#f59e0b' for s in skews]
 
     skew_fig = go.Figure(go.Bar(
         x=[f"{d}d" for d in dtes],
@@ -339,10 +339,10 @@ with tab3:
         hovertemplate="DTE: %{x}<br>Skew: %{y:+.2f}%<extra></extra>"
     ))
 
-    skew_fig.add_hline(y=0, line_color='#6b7a8f', line_dash='dash', line_width=1)
+    skew_fig.add_hline(y=0, line_color='#888888', line_dash='dash', line_width=1)
 
     skew_fig.update_layout(
-        **dark_plotly_layout(
+        **carbon_plotly_layout(
             height=400,
             title=f"{ticker} Put-Call Skew by Expiration  (95% Put IV − 105% Call IV)",
             xaxis_title="Expiration",

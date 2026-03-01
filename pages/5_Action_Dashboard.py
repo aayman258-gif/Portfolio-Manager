@@ -16,7 +16,7 @@ import yfinance as yf
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.theme import apply_dark_theme
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, GAIN, LOSS
 
 from calculations.regime_detector import RegimeDetector
 from calculations.scoring_engine import ScoringEngine
@@ -31,7 +31,7 @@ st.set_page_config(
     page_icon="🎯",
     layout="wide"
 )
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("🎯 Action Dashboard")
 st.markdown("**What should I do today?**")
@@ -406,20 +406,19 @@ with col1:
     fig_pnl = go.Figure(data=[go.Bar(
         x=position_metrics['ticker'],
         y=position_metrics['total_pnl'],
-        marker_color=position_metrics['total_pnl'].apply(lambda x: 'green' if x > 0 else 'red'),
+        marker_color=position_metrics['total_pnl'].apply(lambda x: GAIN if x > 0 else LOSS),
         text=position_metrics['total_pnl'],
         texttemplate='$%{text:,.0f}',
         textposition='outside'
     )])
 
-    fig_pnl.update_layout(
+    fig_pnl.update_layout(**carbon_plotly_layout(
         title="Position P&L",
         xaxis_title="",
         yaxis_title="P&L ($)",
         height=300,
-        template='plotly_dark',
-        showlegend=False
-    )
+        showlegend=False,
+    ))
 
     fig_pnl.add_hline(y=0, line_dash="dash", line_color="gray")
 
@@ -433,16 +432,16 @@ with col2:
         hole=0.4,
         marker=dict(
             colors=position_metrics['total_pnl'].apply(
-                lambda x: '#00CC00' if x > 0 else '#FF6B6B'
+                lambda x: GAIN if x > 0 else LOSS
             )
         )
     )])
 
-    fig_pie.update_layout(
+    fig_pie.update_layout(**carbon_plotly_layout(
         title="Portfolio Allocation",
         height=300,
-        showlegend=True
-    )
+        showlegend=True,
+    ))
 
     st.plotly_chart(fig_pie, use_container_width=True)
 

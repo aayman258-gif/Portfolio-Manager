@@ -15,7 +15,7 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.theme import apply_dark_theme
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
 
 from calculations.options_analytics import OptionsAnalytics
 from calculations.options_recommender import OptionsRecommender
@@ -29,7 +29,7 @@ st.set_page_config(
     page_icon="📊",
     layout="wide"
 )
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("📊 Options Analytics & Trading")
 st.markdown("**Section 6:** Analyze options positions with Greeks and get regime-aware recommendations")
@@ -474,7 +474,7 @@ with tab2:
         fig.add_vline(x=underlying_price, line_dash="dash", line_color="gray", row=2, col=1)
         fig.add_vline(x=strike_price, line_dash="dash", line_color="red", row=2, col=1)
 
-        fig.update_layout(height=600, showlegend=False, template='plotly_dark')
+        fig.update_layout(**carbon_plotly_layout(height=600, showlegend=False))
         fig.update_xaxes(title_text="Underlying Price ($)", row=2, col=1)
         fig.update_yaxes(title_text="Position Value ($)", row=1, col=1)
         fig.update_yaxes(title_text="Delta", row=2, col=1)

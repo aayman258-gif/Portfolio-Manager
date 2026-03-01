@@ -15,7 +15,8 @@ sys.path.append(str(Path(__file__).parent.parent))
 
 from calculations.regime_detector import RegimeDetector
 from data.market_data import MarketDataLoader
-from utils.theme import apply_dark_theme, dark_plotly_layout, chart_style_toggle
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
+from utils.theme import chart_style_toggle
 
 
 def build_regime_change_summary(old_regime: str, new_regime: str, signals: 'pd.DataFrame') -> dict:
@@ -77,7 +78,7 @@ st.set_page_config(
     page_icon="🌍",
     layout="wide"
 )
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("🌍 Market Regime Dashboard")
 st.markdown("**Section 2:** Detect current market regime and display macro indicators")
@@ -157,9 +158,9 @@ try:
         why_bullets = ''.join(f'<li>{r}</li>' for r in change_summary['why'])
         st.markdown(
             f"""
-            <div style="background-color: #fff3cd; border-left: 5px solid #ffc107;
-                        padding: 16px 20px; border-radius: 6px; margin-bottom: 16px;">
-                <h4 style="margin: 0 0 8px 0; color: #856404;">⚠️ Regime Change Detected</h4>
+            <div style="background-color: rgba(245,158,11,0.10); border-left: 3px solid #f59e0b;
+                        padding: 16px 20px; border-radius: 8px; margin-bottom: 16px;">
+                <h4 style="margin: 0 0 8px 0; color: #f59e0b; font-family: 'Palatino Linotype',serif;">⚠️ Regime Change Detected</h4>
                 <p style="margin: 0 0 8px 0; font-size: 16px;">
                     {old_emoji} <strong>{prev_regime}</strong> &rarr;
                     {new_emoji} <strong>{current_regime}</strong>
@@ -191,10 +192,10 @@ try:
 
     # Large regime indicator
     st.markdown(f"""
-    <div style="text-align: center; padding: 20px; background-color: #f0f2f6; border-radius: 10px; margin-bottom: 20px;">
-        <h1 style="font-size: 60px; margin: 0;">{emoji}</h1>
-        <h2 style="margin: 10px 0;">{current_regime}</h2>
-        <p style="font-size: 18px; color: #666;">{regime_info['description']}</p>
+    <div style="text-align: center; padding: 20px; background-color: #1a1a1a; border-radius: 8px; border: 1px solid #2a2a2a; margin-bottom: 20px;">
+        <div style="font-size: 60px; margin: 0;">{emoji}</div>
+        <div style="font-size: 1.6rem; font-style: italic; font-family: 'Palatino Linotype',serif; color: #22d3ee; margin: 8px 0;">{current_regime}</div>
+        <div style="font-size: 0.9rem; color: #888888; font-family: 'Palatino Linotype',serif;">{regime_info['description']}</div>
     </div>
     """, unsafe_allow_html=True)
 
@@ -345,16 +346,16 @@ try:
                 low=ohlcv['Low'],
                 close=ohlcv['Close'],
                 name=index_ticker,
-                increasing_line_color='#22c55e',
-                decreasing_line_color='#ef4444',
-                increasing_fillcolor='rgba(34,197,94,0.7)',
-                decreasing_fillcolor='rgba(239,68,68,0.7)',
+                increasing_line_color='#22d3ee',
+                decreasing_line_color='#fb7185',
+                increasing_fillcolor='rgba(34,211,238,0.6)',
+                decreasing_fillcolor='rgba(251,113,133,0.6)',
             ),
             row=1, col=1
         )
 
         # Volume bars
-        colors = ['#22c55e' if c >= o else '#ef4444'
+        colors = ['#22d3ee' if c >= o else '#fb7185'
                   for c, o in zip(ohlcv['Close'].fillna(0), ohlcv['Open'].fillna(0))]
         fig.add_trace(
             go.Bar(
@@ -373,7 +374,7 @@ try:
                 x=signals.index,
                 y=signals['price'],
                 name=f'{index_ticker} Price',
-                line=dict(color='#00d4aa', width=2),
+                line=dict(color='#22d3ee', width=2),
                 fill='tonexty',
             ),
             row=1, col=1
@@ -406,8 +407,8 @@ try:
         ),
         row=vix_row, col=1
     )
-    fig.add_hline(y=20, line_dash="dash", line_color="#6b7a8f", opacity=0.6, row=vix_row, col=1)
-    fig.add_hline(y=30, line_dash="dash", line_color="#ef4444", opacity=0.6, row=vix_row, col=1)
+    fig.add_hline(y=20, line_dash="dash", line_color="#888888", opacity=0.6, row=vix_row, col=1)
+    fig.add_hline(y=30, line_dash="dash", line_color="#fb7185", opacity=0.6, row=vix_row, col=1)
 
     # Realized Vol subplot
     fig.add_trace(
@@ -420,7 +421,7 @@ try:
     )
 
     fig.update_layout(
-        **dark_plotly_layout(height=950, showlegend=False, hovermode='x unified'),
+        **carbon_plotly_layout(height=950, showlegend=False, hovermode='x unified'),
         xaxis_rangeslider_visible=False,
     )
     fig.update_xaxes(title_text="Date", row=n_rows, col=1)

@@ -16,7 +16,7 @@ from datetime import datetime
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.theme import apply_dark_theme, dark_plotly_layout
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
 
 from data.options_data import OptionsDataLoader
 from calculations.options_analytics import OptionsAnalytics
@@ -30,7 +30,7 @@ st.set_page_config(
     page_icon="🔴",
     layout="wide"
 )
-apply_dark_theme()
+apply_carbon_theme()
 
 st.title("🔴 Live Options Chain")
 st.markdown("**Section 7:** Pull real-time options data from public API")
@@ -196,7 +196,7 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                 # Highlight ITM
                 def highlight_itm(row):
                     if row.get('ITM', False):
-                        return ['background-color: #90EE90'] * len(row)
+                        return ['background-color: rgba(34,211,238,0.15)'] * len(row)
                     return [''] * len(row)
 
                 styled_calls = calls_display.style.format({
@@ -290,9 +290,9 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                 # Format and display
                 def color_by_type(row):
                     if row['type'] == 'call':
-                        return ['background-color: #E6F3FF'] * len(row)
+                        return ['background-color: rgba(34,211,238,0.12)'] * len(row)
                     else:
-                        return ['background-color: #FFE6E6'] * len(row)
+                        return ['background-color: rgba(251,113,133,0.12)'] * len(row)
 
                 styled_high_vol = high_vol_options.style.format({
                     'strike': '${:.2f}',
@@ -863,10 +863,10 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                                 _fig_gauge = go.Figure(go.Indicator(
                                     mode="gauge+number",
                                     value=_pop * 100,
-                                    number={'suffix': '%', 'font': {'color': '#e8edf3'}},
+                                    number={'suffix': '%', 'font': {'color': '#ffffff'}},
                                     gauge={
                                         'axis': {'range': [0, 100]},
-                                        'bar':  {'color': '#00d4aa'},
+                                        'bar':  {'color': '#22d3ee'},
                                         'steps': [
                                             {'range': [0,  40], 'color': '#3a1515'},
                                             {'range': [40, 60], 'color': '#2d2a15'},
@@ -874,9 +874,9 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                                         ],
                                     },
                                     title={'text': 'Probability of Profit',
-                                           'font': {'color': '#e8edf3'}}
+                                           'font': {'color': '#ffffff'}}
                                 ))
-                                _fig_gauge.update_layout(**dark_plotly_layout(height=220))
+                                _fig_gauge.update_layout(**carbon_plotly_layout(height=220))
                                 st.plotly_chart(_fig_gauge, use_container_width=True)
 
                                 # Touch probabilities for short legs
@@ -888,9 +888,9 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                                             underlying_price, _leg['strike'],
                                             _atm_iv, _r, time_to_exp
                                         )
-                                        _tc = ('#22c55e' if _touch < 0.3
+                                        _tc = ('#22d3ee' if _touch < 0.3
                                                else '#f59e0b' if _touch < 0.5
-                                               else '#ef4444')
+                                               else '#fb7185')
                                         st.markdown(
                                             f"- Strike **${_leg['strike']:.1f}** "
                                             f"({_leg['option_type']}): "
@@ -1111,15 +1111,15 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                     valid_sorted['cum_pnl'] = valid_sorted['pnl'].cumsum()
 
                     _rc_bt = {
-                        'Low Vol': '#22c55e', 'High Vol': '#ef4444',
-                        'Trending': '#4a9eff', 'Mean Reversion': '#f59e0b', 'Unknown': '#6b7a8f'
+                        'Low Vol': '#22d3ee', 'High Vol': '#fb7185',
+                        'Trending': '#22d3ee', 'Mean Reversion': '#f59e0b', 'Unknown': '#888888'
                     }
 
                     fig_cum = go.Figure()
                     fig_cum.add_trace(go.Scatter(
                         x=valid_sorted['date'], y=valid_sorted['cum_pnl'],
                         mode='lines', name='Cumulative P&L',
-                        line=dict(color='#00d4aa', width=2.5),
+                        line=dict(color='#22d3ee', width=2.5),
                         fill='tozeroy', fillcolor='rgba(0,212,170,0.08)'
                     ))
 
@@ -1134,9 +1134,9 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                                 marker=dict(color=reg_col, size=6, opacity=0.7)
                             ))
 
-                    fig_cum.add_hline(y=0, line_color='#6b7a8f', line_dash='dash')
+                    fig_cum.add_hline(y=0, line_color='#888888', line_dash='dash')
                     fig_cum.update_layout(
-                        **dark_plotly_layout(height=400, hovermode='x unified',
+                        **carbon_plotly_layout(height=400, hovermode='x unified',
                                              title=f"{bt_strategy} — Cumulative P&L")
                     )
                     st.plotly_chart(fig_cum, use_container_width=True)
@@ -1184,9 +1184,9 @@ if 'options_ticker' in st.session_state and st.session_state.get('options_loaded
                                 boxmean=True
                             ))
 
-                    fig_dist.add_hline(y=0, line_color='#6b7a8f', line_dash='dash')
+                    fig_dist.add_hline(y=0, line_color='#888888', line_dash='dash')
                     fig_dist.update_layout(
-                        **dark_plotly_layout(height=400,
+                        **carbon_plotly_layout(height=400,
                                              title="P&L Distribution by Regime ($)",
                                              yaxis_title="P&L per Trade ($)")
                     )

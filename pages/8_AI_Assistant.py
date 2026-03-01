@@ -23,7 +23,7 @@ from openai import OpenAI
 # Add parent directory to path (same pattern as other pages)
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.theme import apply_dark_theme
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout
 
 from calculations.optimizer import RegimeAwareOptimizer
 from calculations.regime_detector import RegimeDetector
@@ -37,9 +37,9 @@ st.set_page_config(
     page_icon="🤖",
     layout="wide",
 )
-apply_dark_theme()
+apply_carbon_theme()
 
-PLOTLY_TEMPLATE = "plotly_dark"
+PLOTLY_TEMPLATE = "plotly_dark"  # kept for reference; charts use carbon_plotly_layout
 
 
 # ─── System prompt / action contract ────────────────────────────────────────────
@@ -371,8 +371,8 @@ def _render_optimizer_result(result: Dict[str, Any]) -> None:
             y="weight_raw",
             title="Target Allocation",
             labels={"weight_raw": "Weight", "Ticker": ""},
-            template=PLOTLY_TEMPLATE,
         )
+        fig.update_layout(**carbon_plotly_layout())
         fig.update_yaxes(tickformat=".0%")
         st.plotly_chart(fig, use_container_width=True)
 
