@@ -128,11 +128,15 @@ try:
     current_vol = signals['realized_vol'].iloc[-1]
     current_trend = signals['trend'].iloc[-1]
 
-    # Find previous non-Unknown regime (walk backwards from second-to-last point)
+    # Per-regime confidence scores for the latest bar
+    confidence_scores = detector.get_current_confidence(signals)
+    best_confidence   = confidence_scores.get('best_confidence', 0.0)
+
+    # Find previous non-Unknown / non-Uncertain regime
     prev_regime = None
     prev_regime_date = None
     for i in range(len(regime) - 2, -1, -1):
-        if regime.iloc[i] != 'Unknown':
+        if regime.iloc[i] not in ('Unknown', 'Uncertain'):
             prev_regime = regime.iloc[i]
             prev_regime_date = regime.index[i]
             break
@@ -143,7 +147,7 @@ try:
     # Regime change callout
     if (
         prev_regime is not None
-        and current_regime != 'Unknown'
+        and current_regime not in ('Unknown', 'Uncertain')
         and prev_regime != current_regime
     ):
         change_summary = build_regime_change_summary(prev_regime, current_regime, signals)
@@ -184,19 +188,50 @@ try:
         'High Vol': '🔴',
         'Trending': '🔵',
         'Mean Reversion': '🟡',
-        'Unknown': '⚪'
+        'Uncertain': '🔘',
+        'Unknown': '⚪',
     }
 
     emoji = regime_colors.get(current_regime, '⚪')
 
-    # Large regime indicator
+    # Large regime indicator with confidence badge
+    conf_pct = int(best_confidence * 100)
+    conf_color = '#22d3ee' if conf_pct >= 60 else '#f59e0b' if conf_pct >= 35 else '#fb7185'
     st.markdown(f"""
     <div style="text-align: center; padding: 20px; background-color: #1a1a1a; border-radius: 8px; border: 1px solid #2a2a2a; margin-bottom: 20px;">
         <div style="font-size: 60px; margin: 0;">{emoji}</div>
         <div style="font-size: 1.6rem; font-style: italic; font-family: 'Palatino Linotype',serif; color: #22d3ee; margin: 8px 0;">{current_regime}</div>
-        <div style="font-size: 0.9rem; color: #888888; font-family: 'Palatino Linotype',serif;">{regime_info['description']}</div>
+        <div style="font-size: 0.9rem; color: #888888; font-family: 'Palatino Linotype',serif; margin-bottom: 8px;">{regime_info['description']}</div>
+        <div style="display:inline-block; background:{conf_color}22; border:1px solid {conf_color}66; border-radius:6px; padding:3px 12px;">
+            <span style="font-family:'Palatino Linotype',serif; font-size:0.78rem; color:{conf_color};">
+                Confidence: {conf_pct}%
+            </span>
+        </div>
     </div>
     """, unsafe_allow_html=True)
+
+    # Confidence breakdown bars
+    with st.expander("Signal Confidence Breakdown", expanded=(current_regime == 'Uncertain')):
+        for r_name, r_score in {
+            'Low Vol': confidence_scores.get('Low Vol', 0),
+            'High Vol': confidence_scores.get('High Vol', 0),
+            'Trending': confidence_scores.get('Trending', 0),
+            'Mean Reversion': confidence_scores.get('Mean Reversion', 0),
+        }.items():
+            bar_pct = int(r_score * 100)
+            bar_color = '#22d3ee' if r_name == current_regime else '#555555'
+            st.markdown(
+                f'<div style="margin-bottom:6px;">'
+                f'<span style="font-family:\'Palatino Linotype\',serif;font-size:0.78rem;'
+                f'color:#888888;display:inline-block;width:130px;">{r_name}</span>'
+                f'<span style="display:inline-block;height:10px;width:{bar_pct * 2}px;'
+                f'background:{bar_color};border-radius:3px;vertical-align:middle;"></span>'
+                f'<span style="font-family:\'Palatino Linotype\',serif;font-size:0.75rem;'
+                f'color:{bar_color};margin-left:8px;">{bar_pct}%</span>'
+                f'</div>',
+                unsafe_allow_html=True,
+            )
+        st.caption(f"Threshold to assign a regime: {int(0.35*100)}%")
 
     # Regime Details
     col1, col2 = st.columns(2)
@@ -291,11 +326,12 @@ try:
 
     # Color map for regimes
     color_map = {
-        'Low Vol':       'rgba(34,197,94,0.18)',
-        'High Vol':      'rgba(239,68,68,0.18)',
-        'Trending':      'rgba(74,158,255,0.18)',
-        'Mean Reversion':'rgba(245,158,11,0.18)',
-        'Unknown':       'rgba(107,122,143,0.06)'
+        'Low Vol':        'rgba(34,211,238,0.18)',
+        'High Vol':       'rgba(251,113,133,0.18)',
+        'Trending':       'rgba(34,211,238,0.10)',
+        'Mean Reversion': 'rgba(245,158,11,0.18)',
+        'Uncertain':      'rgba(136,136,136,0.12)',
+        'Unknown':        'rgba(136,136,136,0.06)',
     }
 
     # Build subplots — extra row for volume when candlestick is selected
