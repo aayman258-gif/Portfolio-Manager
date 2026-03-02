@@ -20,7 +20,7 @@ Individual investors managing concentrated portfolios (5–15 positions) face a 
 
 ## What Was Built
 
-A 13-page Streamlit application delivering regime-aware portfolio management, options analytics, Monte Carlo simulation, and AI-assisted analysis — all from free public data sources.
+A 14-page Streamlit application delivering regime-aware portfolio management, options analytics, Monte Carlo simulation, fundamental analysis, and AI-assisted analysis — all from free public data sources.
 
 ### Core Workflow
 
@@ -32,7 +32,8 @@ Open the dashboard → In one session:
 4. **Run optimization** — target weights, rebalancing trades including cash
 5. **Analyze options exposure** — live portfolio Greeks, hedge analysis, strategy builder
 6. **Simulate outcomes** — Monte Carlo price paths with 3D probability distribution
-7. **Ask the AI assistant** — conversational analysis with portfolio context
+7. **Research any stock** — full financial statements, 7-dimension scoring, peer comparison, screening
+8. **Ask the AI assistant** — conversational analysis with portfolio context
 
 ---
 
@@ -88,8 +89,10 @@ Open the dashboard → In one session:
 - **Offline mode** — no API key required; falls back to a rule-based response engine covering regime analysis, Greeks, optimization, position scoring, and general portfolio questions
 
 ### Portfolio Hedge Analyzer (Page 9)
-- Protective put, put spread, and collar analysis
-- Regime-aware hedge sizing recommendations
+- Auto-reads positions, cash, and prices from session state; computes portfolio beta via batch OLS vs SPY
+- **Portfolio-level SPY hedges**: Protective Put, Put Spread, Collar, Put Ratio Spread — contracts sized by portfolio beta
+- **Individual position hedges**: Protective Put, Collar, Covered Call per stock with live option chain; falls back to nearest expiry or Black-Scholes estimate
+- Scenario analysis (−30% to +30% SPY) for all strategies; regime-aware urgency banner and recommendation
 
 ### Volatility Surface (Page 10)
 - 3D implied volatility surface (strike × expiry × IV) using `go.Surface`
@@ -102,6 +105,15 @@ Open the dashboard → In one session:
 ### Trade Suggestions (Page 12)
 - Algorithm-scored trade ideas with regime filtering
 - Strategy cards with risk/reward summaries
+
+### Stock Screener & Fundamentals (Page 14)
+- **Any ticker** — full income statement, balance sheet, and cash flow (annual + quarterly, 1Y–Max lookback)
+- **7-dimension fundamental scoring** (0–100 each): Revenue Growth, Profitability, Return on Equity, Valuation, Leverage, Cash Generation, Earnings Quality
+- Radar/spider chart with up to 5 peer overlays; composite score bar; scores written to `session_state['fundamental_scores']` for Position Scoring integration
+- Trend charts per tab: margin trends, EPS, FCF margin, current ratio, debt vs cash, D&A, buybacks
+- **Valuation vs Peers**: 4 multiple comparison charts, profitability grouped bar, P/E vs revenue growth bubble chart (sized by market cap), full peer metrics table, 5-year historical P/E
+- **Screener**: 9 filter sliders (P/E, margins, ROE, D/E, current ratio, FCF, composite score) applied to any ticker list; results table with RdYlGn score gradient; CSV export
+- Portfolio tickers auto-populated; comparison tickers pre-filled from portfolio
 
 ### Monte Carlo Simulation (Page 13)
 - **Geometric Brownian Motion**: `S(t) = S0 · exp((μ − σ²/2)t + σ√t · Z)`
@@ -120,7 +132,7 @@ Open the dashboard → In one session:
 | Question | Resolution |
 |---|---|
 | Position entry method? | Manual entry + CSV upload (no broker API needed) |
-| Fundamental scoring weights? | Regime-adaptive weights combining momentum, volatility, growth, quality, valuation |
+| Fundamental scoring weights? | Regime-adaptive weights combining momentum, volatility, growth, quality, valuation; deep fundamental scores via Stock Screener (page 14) |
 | Rebalancing frequency? | On-demand; triggered by user or regime change |
 | Benchmark selection? | SPY as market proxy for CAPM betas; configurable lookback |
 | Transaction costs? | Excluded from optimization (concentrated portfolio assumption) |

@@ -87,10 +87,12 @@ See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions.
 - Persistent chat history per session
 
 ### Page 9 — Portfolio Hedge Analyzer
-- Protective put sizing and cost analysis
-- Put spread construction
-- Collar strategy analysis
-- Regime-aware hedge recommendations
+- **Auto-reads portfolio** from session state (positions, cash, prices, total value)
+- Portfolio beta computed via batch OLS vs SPY (cached); falls back to manual inputs if no portfolio loaded
+- **Portfolio-level SPY hedges** (scaled by portfolio beta): Protective Put, Put Spread, Collar, Put Ratio Spread
+- **Individual position hedges**: Protective Put, Collar, Covered Call per stock — uses live option chain with expiry fallback and Black-Scholes estimate if chain unavailable
+- Scenario analysis chart and P&L table for all 4 strategies across −30% to +30% SPY moves
+- Regime-aware urgency banner and hedge recommendation with cost comparison table
 
 ### Page 10 — Volatility Surface
 - 3D implied volatility surface (strike × expiry × IV)
@@ -107,6 +109,16 @@ See [QUICKSTART.md](QUICKSTART.md) for detailed setup instructions.
 - Algorithm-scored trade ideas
 - Strategy cards with risk/reward summary
 - Regime-filtered suggestions
+
+### Page 14 — Stock Screener & Fundamentals
+- **Overview tab**: 18 key metrics (valuation multiples, margins, growth, leverage, CF), 7-dimension radar/spider chart with peer overlays, composite score bar (0–100), business description
+- **7 scoring dimensions**: Revenue Growth, Profitability, Return on Equity, Valuation, Leverage, Cash Generation, Earnings Quality — scores saved to session state for Position Scoring integration
+- **Income Statement tab**: full table + revenue/profit grouped bars, gross/operating/net margin trend lines, diluted EPS bars (green/red by sign)
+- **Balance Sheet tab**: full table + assets/liabilities/equity bars, debt vs cash bars, current ratio trend with reference lines
+- **Cash Flow tab**: full table + OCF/CapEx bars, free cash flow bars, FCF margin trend, D&A and buyback charts
+- **Valuation & Peers tab**: 4 multiple comparison charts (P/E, EV/EBITDA, P/S, P/B), profitability grouped bar, P/E vs revenue growth bubble chart (sized by market cap), full peer metrics table, historical P/E chart
+- **Screener tab**: 9 filter sliders applied to any ticker list (portfolio auto-populated); results table with RdYlGn score gradient, composite score bar chart, CSV download
+- Annual / Quarterly toggle with 1Y–Max lookback; portfolio tickers pre-populated throughout
 
 ### Page 13 — Monte Carlo Simulation
 - **Geometric Brownian Motion** price simulation (`S(t) = S0 · exp((μ − σ²/2)t + σ√t · Z)`)
@@ -200,7 +212,8 @@ portfolio-manager/
 │   ├── 10_Vol_Surface.py                # 3D volatility surface
 │   ├── 11_Options_Flow.py               # Unusual flow scanner
 │   ├── 12_Trade_Suggestions.py          # Algo-scored trade ideas
-│   └── 13_Monte_Carlo.py                # GBM price simulation
+│   ├── 13_Monte_Carlo.py                # GBM price simulation
+│   └── 14_Stock_Screener.py             # Fundamentals, scoring, peer comparison, screener
 ├── calculations/
 │   ├── regime_detector.py               # VIX + vol regime classification
 │   ├── scoring_engine.py                # Position scoring
