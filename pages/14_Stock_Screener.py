@@ -46,6 +46,12 @@ def _fp(v, d=1) -> str:
     except Exception:
         return "—"
 
+def _hex_rgba(hex_color: str, alpha: float = 0.10) -> str:
+    """Convert '#rrggbb' to 'rgba(r,g,b,a)' for Plotly fillcolor."""
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r},{g},{b},{alpha})"
+
 def _fx(v, d=1) -> str:
     try:
         return f"{float(v):.{d}f}×" if not np.isnan(float(v)) else "—"
@@ -329,7 +335,7 @@ with tab1:
             pc     = _PEER_COLORS[i % len(_PEER_COLORS)]
             fig_radar.add_trace(go.Scatterpolar(
                 r=p_vals + [p_vals[0]], theta=dims + [dims[0]],
-                fill="toself", fillcolor=f"{pc}18",
+                fill="toself", fillcolor=_hex_rgba(pc, 0.09),
                 line=dict(color=pc, width=1.5, dash="dot"),
                 name=tk,
             ))
