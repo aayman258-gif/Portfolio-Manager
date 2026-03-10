@@ -12,6 +12,7 @@ import pandas as pd
 import numpy as np
 import yfinance as yf
 import plotly.graph_objects as go
+from plotly.subplots import make_subplots
 import sys
 from pathlib import Path
 
@@ -939,98 +940,160 @@ with tab5:
             )
             st.dataframe(disp, use_container_width=True, hide_index=True)
 
-    # Historical P/E — fiscal-year price vs fiscal-year EPS
+    # Historical P/E — daily granularity, rolling TTM EPS
     st.divider()
     st.subheader("Historical P/E")
 
-    fin_annual = stmts.get("financials", pd.DataFrame())
-    eps_row    = _row(fin_annual, "Diluted EPS", "Basic EPS", "Reported EPS")
+    q_fin   = stmts.get("quarterly_financials", pd.DataFrame())
+    q_eps_r = _row(q_fin, "Diluted EPS", "Basic EPS", "Reported EPS")
 
-    if eps_row.empty or px.empty:
-        st.caption("Historical P/E unavailable — no annual EPS or price data.")
+    if q_eps_r.empty or px.empty:
+        st.caption("Historical P/E unavailable — no quarterly EPS or price data.")
     else:
-        px_close = px["Close"] if "Close" in px.columns else px.iloc[:, 0]
+        px_close = (px["Close"] if "Close" in px.columns else px.iloc[:, 0]).dropna()
 
-        annual_pe = []
-        for date, eps_val in eps_row.items():
-            eps_v = _safe(eps_val)
-            if np.isnan(eps_v) or eps_v == 0:
-                continue
-            ts = pd.Timestamp(date)
-            # Use the price on or nearest to the fiscal year-end date
-            if ts < px_close.index[0] or ts > px_close.index[-1]:
-                continue
-            idx   = px_close.index.get_indexer([ts], method="nearest")[0]
-            price = float(px_close.iloc[idx])
-            pe    = price / eps_v
-            if pe > 0:
-                annual_pe.append({
-                    "label": ts.strftime("%b %Y"),
-                    "date":  ts,
-                    "eps":   eps_v,
-                    "price": price,
-                    "pe":    pe,
-                })
+        # Apply a 45-day reporting lag to each quarterly EPS so we only "know"
+        # a quarter's EPS 45 days after the fiscal period ended.
+        _LAG = pd.Timedelta(days=45)
+        eps_schedule = sorted(
+            [
+                (pd.Timestamp(d) + _LAG, _safe(v))
+                for d, v in q_eps_r.items()
+                if not np.isnan(_safe(v))
+            ],
+            key=lambda x: x[0],
+        )
 
-        if not annual_pe:
-            st.caption("Not enough overlapping annual EPS and price data.")
+        if len(eps_schedule) < 4:
+            st.caption("Not enough quarterly EPS history (need ≥ 4 quarters).")
         else:
-            pe_df  = pd.DataFrame(annual_pe).sort_values("date")
-            pe_med = float(pe_df["pe"].median())
-            curr_pe = _safe(nfo.get("trailingPE"), np.nan)
-
-            fig_hpe = go.Figure()
-
-            fig_hpe.add_trace(go.Scatter(
-                x=pe_df["date"],
-                y=pe_df["pe"],
-                mode="lines+markers",
-                line=dict(color="#4a9eff", width=2.5),
-                marker=dict(size=8, color="#4a9eff"),
-                fill="tozeroy",
-                fillcolor="rgba(74,158,255,0.07)",
-                customdata=list(zip(pe_df["price"], pe_df["eps"])),
-                hovertemplate=(
-                    "<b>%{x|%b %Y}</b><br>"
-                    "P/E: %{y:.1f}×<br>"
-                    "Price: $%{customdata[0]:.2f}<br>"
-                    "EPS: $%{customdata[1]:.2f}<extra></extra>"
-                ),
-                name="Annual P/E",
-            ))
-
-            fig_hpe.add_hline(
-                y=pe_med, line_color="#f59e0b", line_dash="dot",
-                annotation_text=f"Median {pe_med:.1f}×",
-                annotation_font_color="#f59e0b",
-            )
-            if not np.isnan(curr_pe):
-                fig_hpe.add_hline(
-                    y=curr_pe, line_color="#00d4aa", line_dash="dash",
-                    annotation_text=f"TTM {curr_pe:.1f}×",
-                    annotation_font_color="#00d4aa",
+            # For every price date, TTM EPS = sum of the 4 most recent quarterly
+            # EPS values whose report_date ≤ that price date.
+            ttm_vals = []
+            for price_date in px_close.index:
+                available = [v for d, v in eps_schedule if d <= price_date]
+                ttm_vals.append(
+                    float(sum(available[-4:])) if len(available) >= 4 else np.nan
                 )
 
-            fig_hpe.update_layout(**carbon_plotly_layout(
-                height=380,
-                title=f"{primary} — Historical P/E (fiscal year-end price ÷ annual EPS)",
-                xaxis_title="Fiscal Year End",
-                yaxis_title="P/E Ratio",
-            ))
-            st.plotly_chart(fig_hpe, use_container_width=True)
+            ttm_eps = pd.Series(ttm_vals, index=px_close.index, dtype=float)
+            pe_raw  = (px_close / ttm_eps).where(ttm_eps > 0)
+            pe_raw  = pe_raw.replace([np.inf, -np.inf], np.nan)
 
-            # Summary table
-            tbl = pe_df[["label", "price", "eps", "pe"]].copy()
-            tbl.columns = ["Fiscal Year", "Year-End Price", "Diluted EPS", "P/E"]
-            st.dataframe(
-                tbl.style.format({
-                    "Year-End Price": "${:.2f}",
-                    "Diluted EPS":    "${:.2f}",
-                    "P/E":            "{:.1f}×",
-                }).set_table_styles(_CYAN_HEADER_STYLE),
-                use_container_width=True,
-                hide_index=True,
+            # ── Date range selector ───────────────────────────────────────────
+            range_map = {"1Y": 252, "2Y": 504, "3Y": 756, "5Y": 1260, "Max": len(pe_raw)}
+            sel = st.selectbox(
+                "Date range", list(range_map.keys()),
+                index=3, key="hist_pe_range",
             )
+            n_days   = range_map[sel]
+            pe_plot  = pe_raw.dropna().iloc[-n_days:]
+            eps_plot = ttm_eps.loc[pe_plot.index]
+
+            if pe_plot.empty:
+                st.caption("No valid P/E data for the selected range.")
+            else:
+                fig_hpe = make_subplots(specs=[[{"secondary_y": True}]])
+
+                # ── P/E line — left axis ─────────────────────────────────────
+                fig_hpe.add_trace(
+                    go.Scatter(
+                        x=pe_plot.index, y=pe_plot.values,
+                        name="P/E (TTM)",
+                        mode="lines",
+                        line=dict(color="#4a9eff", width=2),
+                        fill="tozeroy",
+                        fillcolor="rgba(74,158,255,0.07)",
+                        hovertemplate="%{x|%b %d, %Y}<br>P/E: %{y:.1f}×<extra></extra>",
+                    ),
+                    secondary_y=False,
+                )
+
+                # ── TTM EPS line — right axis ────────────────────────────────
+                fig_hpe.add_trace(
+                    go.Scatter(
+                        x=eps_plot.index, y=eps_plot.values,
+                        name="TTM EPS",
+                        mode="lines",
+                        line=dict(color="#f59e0b", width=1.5, dash="dot"),
+                        hovertemplate="%{x|%b %d, %Y}<br>TTM EPS: $%{y:.2f}<extra></extra>",
+                    ),
+                    secondary_y=True,
+                )
+
+                # ── Start / end labels — P/E ─────────────────────────────────
+                pe_start, pe_end = pe_plot.iloc[0], pe_plot.iloc[-1]
+                for x_val, y_val, anchor in [
+                    (pe_plot.index[0],  pe_start, "left"),
+                    (pe_plot.index[-1], pe_end,   "right"),
+                ]:
+                    fig_hpe.add_annotation(
+                        x=x_val, y=y_val,
+                        text=f"<b>{y_val:.1f}×</b>",
+                        showarrow=False,
+                        font=dict(color="#4a9eff", size=11),
+                        xanchor=anchor, yanchor="bottom",
+                        yref="y",
+                    )
+
+                # ── Start / end labels — EPS ─────────────────────────────────
+                eps_start, eps_end = eps_plot.iloc[0], eps_plot.iloc[-1]
+                for x_val, y_val, anchor in [
+                    (eps_plot.index[0],  eps_start, "left"),
+                    (eps_plot.index[-1], eps_end,   "right"),
+                ]:
+                    fig_hpe.add_annotation(
+                        x=x_val, y=y_val,
+                        text=f"<b>${y_val:.2f}</b>",
+                        showarrow=False,
+                        font=dict(color="#f59e0b", size=11),
+                        xanchor=anchor, yanchor="top",
+                        yref="y2",
+                    )
+
+                # ── Median & current reference lines ─────────────────────────
+                pe_med  = float(pe_plot.median())
+                curr_pe = _safe(nfo.get("trailingPE"), np.nan)
+
+                fig_hpe.add_hline(
+                    y=pe_med, line_color="#6b7a8f", line_dash="dot", line_width=1,
+                    annotation_text=f"Median {pe_med:.1f}×",
+                    annotation_font_color="#6b7a8f",
+                )
+                if not np.isnan(curr_pe):
+                    fig_hpe.add_hline(
+                        y=curr_pe, line_color="#00d4aa", line_dash="dash", line_width=1,
+                        annotation_text=f"Current {curr_pe:.1f}×",
+                        annotation_font_color="#00d4aa",
+                    )
+
+                # ── Layout ───────────────────────────────────────────────────
+                fig_hpe.update_layout(
+                    **carbon_plotly_layout(
+                        height=440,
+                        title=f"{primary} — Daily P/E ratio (rolling TTM EPS)",
+                        xaxis_title="Date",
+                    )
+                )
+                fig_hpe.update_yaxes(
+                    title_text="P/E Ratio",
+                    ticksuffix="×",
+                    gridcolor="rgba(107,122,143,0.15)",
+                    secondary_y=False,
+                )
+                fig_hpe.update_yaxes(
+                    title_text="TTM EPS ($)",
+                    tickprefix="$",
+                    showgrid=False,
+                    secondary_y=True,
+                )
+
+                st.plotly_chart(fig_hpe, use_container_width=True)
+                st.caption(
+                    "TTM EPS = sum of 4 most recent quarterly diluted EPS values "
+                    "known on each date (45-day reporting lag). "
+                    "P/E hidden when TTM EPS ≤ 0."
+                )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 6 — SCREENER
