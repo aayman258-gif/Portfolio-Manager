@@ -939,38 +939,104 @@ with tab5:
             )
             st.dataframe(disp, use_container_width=True, hide_index=True)
 
-    # Historical P/E
+    # Historical P/E — fiscal-year price vs fiscal-year EPS
     st.divider()
     st.subheader("Historical P/E")
-    ttm_eps = _safe(nfo.get("trailingEps"), 0)
-    if not px.empty and ttm_eps > 0:
-        px_close = px["Close"] if "Close" in px.columns else px.iloc[:, 0]
-        hist_pe  = px_close / ttm_eps
-        pe_med   = float(hist_pe.median())
-        curr_pe  = _safe(nfo.get("trailingPE"), np.nan)
 
-        fig_hpe = go.Figure()
-        fig_hpe.add_trace(go.Scatter(
-            x=hist_pe.index, y=hist_pe.values, mode="lines",
-            line=dict(color="#4a9eff", width=2),
-            fill="tozeroy", fillcolor="rgba(74,158,255,0.07)",
-            name="Trailing P/E (approx)",
-        ))
-        fig_hpe.add_hline(y=pe_med, line_color="#f59e0b", line_dash="dot",
-                          annotation_text=f"Median {pe_med:.1f}×",
-                          annotation_font_color="#f59e0b")
-        if not np.isnan(curr_pe):
-            fig_hpe.add_hline(y=curr_pe, line_color="#00d4aa", line_dash="dash",
-                              annotation_text=f"Current {curr_pe:.1f}×",
-                              annotation_font_color="#00d4aa")
-        fig_hpe.update_layout(**carbon_plotly_layout(
-            height=340,
-            title=f"{primary} — Trailing P/E (price ÷ trailing EPS {ttm_eps:.2f})",
-            xaxis_title="Date", yaxis_title="P/E Ratio",
-        ))
-        st.plotly_chart(fig_hpe, use_container_width=True)
+    fin_annual = stmts.get("financials", pd.DataFrame())
+    eps_row    = _row(fin_annual, "Diluted EPS", "Basic EPS", "Reported EPS")
+
+    if eps_row.empty or px.empty:
+        st.caption("Historical P/E unavailable — no annual EPS or price data.")
     else:
-        st.caption("Historical P/E unavailable — negative or zero trailing EPS.")
+        px_close = px["Close"] if "Close" in px.columns else px.iloc[:, 0]
+
+        annual_pe = []
+        for date, eps_val in eps_row.items():
+            eps_v = _safe(eps_val)
+            if np.isnan(eps_v) or eps_v == 0:
+                continue
+            ts = pd.Timestamp(date)
+            # Use the price on or nearest to the fiscal year-end date
+            if ts < px_close.index[0] or ts > px_close.index[-1]:
+                continue
+            idx   = px_close.index.get_indexer([ts], method="nearest")[0]
+            price = float(px_close.iloc[idx])
+            pe    = price / eps_v
+            if pe > 0:
+                annual_pe.append({
+                    "label": ts.strftime("%b %Y"),
+                    "date":  ts,
+                    "eps":   eps_v,
+                    "price": price,
+                    "pe":    pe,
+                })
+
+        if not annual_pe:
+            st.caption("Not enough overlapping annual EPS and price data.")
+        else:
+            pe_df  = pd.DataFrame(annual_pe).sort_values("date")
+            pe_med = float(pe_df["pe"].median())
+            curr_pe = _safe(nfo.get("trailingPE"), np.nan)
+
+            fig_hpe = go.Figure()
+
+            # Bar per fiscal year, coloured by vs-median
+            bar_colors = [
+                "#fb7185" if v > pe_med * 1.2
+                else "#22c55e" if v < pe_med * 0.8
+                else "#4a9eff"
+                for v in pe_df["pe"]
+            ]
+            fig_hpe.add_trace(go.Bar(
+                x=pe_df["label"],
+                y=pe_df["pe"],
+                marker_color=bar_colors,
+                text=[f"{v:.1f}×" for v in pe_df["pe"]],
+                textposition="outside",
+                customdata=list(zip(pe_df["price"], pe_df["eps"])),
+                hovertemplate=(
+                    "<b>%{x}</b><br>"
+                    "P/E: %{y:.1f}×<br>"
+                    "Price: $%{customdata[0]:.2f}<br>"
+                    "EPS: $%{customdata[1]:.2f}<extra></extra>"
+                ),
+                name="Annual P/E",
+            ))
+
+            fig_hpe.add_hline(
+                y=pe_med, line_color="#f59e0b", line_dash="dot",
+                annotation_text=f"Median {pe_med:.1f}×",
+                annotation_font_color="#f59e0b",
+            )
+            if not np.isnan(curr_pe):
+                fig_hpe.add_hline(
+                    y=curr_pe, line_color="#00d4aa", line_dash="dash",
+                    annotation_text=f"TTM {curr_pe:.1f}×",
+                    annotation_font_color="#00d4aa",
+                )
+
+            fig_hpe.update_layout(**carbon_plotly_layout(
+                height=380,
+                title=f"{primary} — Historical P/E (fiscal year-end price ÷ annual EPS)",
+                xaxis_title="Fiscal Year End",
+                yaxis_title="P/E Ratio",
+                showlegend=False,
+            ))
+            st.plotly_chart(fig_hpe, use_container_width=True)
+
+            # Summary table
+            tbl = pe_df[["label", "price", "eps", "pe"]].copy()
+            tbl.columns = ["Fiscal Year", "Year-End Price", "Diluted EPS", "P/E"]
+            st.dataframe(
+                tbl.style.format({
+                    "Year-End Price": "${:.2f}",
+                    "Diluted EPS":    "${:.2f}",
+                    "P/E":            "{:.1f}×",
+                }).set_table_styles(_CYAN_HEADER_STYLE),
+                use_container_width=True,
+                hide_index=True,
+            )
 
 # ═════════════════════════════════════════════════════════════════════════════
 # TAB 6 — SCREENER
