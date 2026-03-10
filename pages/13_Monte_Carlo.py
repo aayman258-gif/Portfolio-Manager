@@ -189,7 +189,7 @@ lookback = st.sidebar.selectbox(
 
 show_paths = st.sidebar.number_input(
     "Sample paths to plot",
-    min_value=10, max_value=300, value=100, step=10,
+    min_value=10, max_value=2500, value=100, step=10,
     help="Number of individual simulated paths drawn on the fan chart.",
 )
 

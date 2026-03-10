@@ -65,10 +65,155 @@ def _safe(v, default=np.nan):
     except Exception:
         return default
 
-def _fmt_stmt_df(df: pd.DataFrame, n: int) -> pd.DataFrame:
-    """Trim to n periods and format values for display."""
+# ── Canonical row orderings for financial statements ─────────────────────────
+# Rows are listed top-to-bottom in standard accounting order.
+# _fmt_stmt_df reindexes to this order; any rows not in the list are appended.
+
+_IS_ORDER = [
+    "Total Revenue", "Revenue", "Operating Revenue",
+    "Cost Of Revenue", "Reconciled Cost Of Revenue",
+    "Gross Profit",
+    "Research And Development",
+    "Selling General And Administrative", "Selling General Administrative",
+    "Operating Expense",
+    "Total Expenses",
+    "EBIT", "Operating Income", "Operating Income Or Loss",
+    "Net Non Operating Interest Income Expense",
+    "Interest Expense", "Interest Expense Non Operating",
+    "Interest Income",
+    "Net Interest Income",
+    "Other Income Expense",
+    "Pretax Income",
+    "Tax Provision",
+    "Tax Effect Of Unusual Items",
+    "Net Income From Continuing Operations",
+    "Net Income From Continuing And Discontinued Operation",
+    "Net Income Including Noncontrolling Interests",
+    "Net Income Common Stockholders", "Net Income",
+    "Normalized Income",
+    "EBITDA", "Normalized EBITDA",
+    "Reconciled Depreciation",
+    "Reported EPS", "Diluted EPS", "Basic EPS",
+    "Diluted Average Shares", "Basic Average Shares",
+]
+
+_BS_ORDER = [
+    # Current assets
+    "Cash And Cash Equivalents", "Cash",
+    "Cash Cash Equivalents And Short Term Investments",
+    "Cash And Short Term Investments",
+    "Other Short Term Investments",
+    "Gross Accounts Receivable", "Net Receivables", "Receivables",
+    "Allowance For Doubtful Accounts Receivable",
+    "Other Receivables",
+    "Inventory",
+    "Hedging Assets Current", "Assets Held For Sale Current",
+    "Restricted Cash",
+    "Other Current Assets",
+    "Current Assets",
+    # Non-current assets
+    "Net PPE",
+    "Goodwill",
+    "Intangible Assets", "Goodwill And Other Intangible Assets",
+    "Long Term Equity Investment",
+    "Investments And Advances",
+    "Non Current Deferred Assets",
+    "Other Non Current Assets",
+    "Total Non Current Assets",
+    "Total Assets",
+    # Current liabilities
+    "Accounts Payable", "Payables",
+    "Payables And Accrued Expenses",
+    "Current Debt", "Current Capital Lease Obligation",
+    "Current Debt And Capital Lease Obligation",
+    "Current Deferred Liabilities",
+    "Other Current Liabilities",
+    "Current Liabilities",
+    # Non-current liabilities
+    "Long Term Debt", "Long Term Capital Lease Obligation",
+    "Long Term Debt And Capital Lease Obligation",
+    "Trade And Other Payables Non Current",
+    "Other Non Current Liabilities",
+    "Total Non Current Liabilities Net Minority Interest",
+    "Total Liabilities Net Minority Interest", "Total Liabilities", "Total Liab",
+    # Equity
+    "Common Stock",
+    "Capital Stock",
+    "Additional Paid In Capital",
+    "Retained Earnings",
+    "Gains Losses Not Affecting Retained Earnings",
+    "Common Stock Equity", "Stockholders Equity", "Total Stockholder Equity",
+    "Total Equity Gross Minority Interest",
+    # Summary metrics
+    "Total Debt",
+    "Net Debt",
+    "Working Capital",
+    "Tangible Book Value", "Net Tangible Assets",
+    "Invested Capital",
+    "Capital Lease Obligations",
+    "Share Issued", "Ordinary Shares Number", "Treasury Shares Number",
+]
+
+_CF_ORDER = [
+    # Operating
+    "Net Income From Continuing Operations",
+    "Depreciation And Amortization", "Depreciation Amortization Depletion",
+    "Depreciation Depletion And Amortization",
+    "Deferred Tax",
+    "Stock Based Compensation",
+    "Change In Working Capital",
+    "Changes In Account Receivables",
+    "Other Non Cash Items",
+    "Operating Cash Flow", "Cash Flow From Continuing Operating Activities",
+    # Investing
+    "Capital Expenditure", "Capital Expenditures",
+    "Purchase Of PPE", "Purchases Of Property Plant And Equipment",
+    "Sale Of Investment", "Purchase Of Investment",
+    "Net Investment Purchase And Sale",
+    "Net PPE Purchase And Sale",
+    "Purchase Of Business",
+    "Net Other Investing Changes",
+    "Net Investing Cash Flows Additional Items",
+    "Investing Cash Flow", "Cash Flow From Continuing Investing Activities",
+    # Financing
+    "Cash Dividends Paid", "Common Stock Dividend Paid",
+    "Repurchase Of Capital Stock", "Common Stock Repurchased",
+    "Repurchase Of Common Stock",
+    "Net Common Stock Issuance", "Issuance Of Capital Stock",
+    "Long Term Debt Issuance", "Long Term Debt Payments",
+    "Net Long Term Debt Issuance",
+    "Repayment Of Debt", "Issuance Of Debt",
+    "Total Other Financing Activities", "Other Financing Activities",
+    "Financing Cash Flow", "Cash Flow From Continuing Financing Activities",
+    # Summary
+    "Free Cash Flow",
+    "Changes In Cash",
+    "Begin Cash Position", "Beginning Cash Position",
+    "End Cash Position",
+]
+
+_CYAN_HEADER_STYLE = [{
+    "selector": "th",
+    "props": [
+        ("background-color", "#00d4aa"),
+        ("color", "#0a0e14"),
+        ("font-weight", "700"),
+    ],
+}]
+
+
+def _fmt_stmt_df(df: pd.DataFrame, n: int, canonical: list = None):
+    """Reorder rows, trim to n periods, format values, apply cyan column headers.
+
+    Returns a pandas Styler ready for st.dataframe().
+    """
     if df.empty:
         return df
+    # Reorder rows to canonical accounting order
+    if canonical:
+        present = [r for r in canonical if r in df.index]
+        rest    = [r for r in df.index if r not in present]
+        df = df.loc[present + rest]
     out = df.iloc[:, :n].copy()
     out.columns = [
         pd.Timestamp(c).strftime("%b %Y") if hasattr(c, "strftime") else str(c)
@@ -78,7 +223,7 @@ def _fmt_stmt_df(df: pd.DataFrame, n: int) -> pd.DataFrame:
         out = out.map(lambda x: _fv(x) if pd.notna(x) else "—")
     except AttributeError:
         out = out.applymap(lambda x: _fv(x) if pd.notna(x) else "—")
-    return out
+    return out.style.set_table_styles(_CYAN_HEADER_STYLE)
 
 # ── Cached data ───────────────────────────────────────────────────────────────
 
@@ -398,7 +543,7 @@ with tab2:
     if fin.empty:
         st.warning("No income statement data available.")
     else:
-        st.dataframe(_fmt_stmt_df(fin, n_periods), use_container_width=True)
+        st.dataframe(_fmt_stmt_df(fin, n_periods, _IS_ORDER), use_container_width=True)
         st.divider()
 
         dates_i = _dates(fin)
@@ -474,7 +619,7 @@ with tab3:
     if bs.empty:
         st.warning("No balance sheet data available.")
     else:
-        st.dataframe(_fmt_stmt_df(bs, n_periods), use_container_width=True)
+        st.dataframe(_fmt_stmt_df(bs, n_periods, _BS_ORDER), use_container_width=True)
         st.divider()
 
         dates_b = _dates(bs)
@@ -556,7 +701,7 @@ with tab4:
     if cf.empty:
         st.warning("No cash flow data available.")
     else:
-        st.dataframe(_fmt_stmt_df(cf, n_periods), use_container_width=True)
+        st.dataframe(_fmt_stmt_df(cf, n_periods, _CF_ORDER), use_container_width=True)
         st.divider()
 
         dates_c = _dates(cf)
