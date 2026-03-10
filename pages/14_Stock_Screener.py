@@ -981,22 +981,17 @@ with tab5:
 
             fig_hpe = go.Figure()
 
-            # Bar per fiscal year, coloured by vs-median
-            bar_colors = [
-                "#fb7185" if v > pe_med * 1.2
-                else "#22c55e" if v < pe_med * 0.8
-                else "#4a9eff"
-                for v in pe_df["pe"]
-            ]
-            fig_hpe.add_trace(go.Bar(
-                x=pe_df["label"],
+            fig_hpe.add_trace(go.Scatter(
+                x=pe_df["date"],
                 y=pe_df["pe"],
-                marker_color=bar_colors,
-                text=[f"{v:.1f}×" for v in pe_df["pe"]],
-                textposition="outside",
+                mode="lines+markers",
+                line=dict(color="#4a9eff", width=2.5),
+                marker=dict(size=8, color="#4a9eff"),
+                fill="tozeroy",
+                fillcolor="rgba(74,158,255,0.07)",
                 customdata=list(zip(pe_df["price"], pe_df["eps"])),
                 hovertemplate=(
-                    "<b>%{x}</b><br>"
+                    "<b>%{x|%b %Y}</b><br>"
                     "P/E: %{y:.1f}×<br>"
                     "Price: $%{customdata[0]:.2f}<br>"
                     "EPS: $%{customdata[1]:.2f}<extra></extra>"
@@ -1021,7 +1016,6 @@ with tab5:
                 title=f"{primary} — Historical P/E (fiscal year-end price ÷ annual EPS)",
                 xaxis_title="Fiscal Year End",
                 yaxis_title="P/E Ratio",
-                showlegend=False,
             ))
             st.plotly_chart(fig_hpe, use_container_width=True)
 
