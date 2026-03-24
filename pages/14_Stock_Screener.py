@@ -945,17 +945,25 @@ with tab5:
     st.subheader("Historical P/E")
 
     q_fin   = stmts.get("quarterly_financials", pd.DataFrame())
+    a_fin   = stmts.get("financials", pd.DataFrame())
     q_eps_r = _row(q_fin, "Diluted EPS", "Basic EPS", "Reported EPS")
+    a_eps_r = _row(a_fin, "Diluted EPS", "Basic EPS", "Reported EPS")
 
-    if q_eps_r.empty or px.empty:
-        st.caption("Historical P/E unavailable — no quarterly EPS or price data.")
+    if (q_eps_r.empty and a_eps_r.empty) or px.empty:
+        st.caption("Historical P/E unavailable — no EPS or price data.")
     else:
         px_close = (px["Close"] if "Close" in px.columns else px.iloc[:, 0]).dropna()
 
-        # Apply a 45-day reporting lag to each quarterly EPS so we only "know"
-        # a quarter's EPS 45 days after the fiscal period ended.
+        # Apply a 45-day reporting lag so we only "know" a result after publication.
         _LAG = pd.Timedelta(days=45)
-        eps_schedule = sorted(
+
+        # yfinance returns split-adjusted EPS in both quarterly_financials and
+        # financials (Yahoo Finance restates historical EPS after splits), and
+        # prices are also split-adjusted via auto_adjust=True — so both sides
+        # already match and no manual split correction is needed.
+
+        # Quarterly EPS schedule (rolling TTM — used when 4+ quarters are known)
+        q_schedule = sorted(
             [
                 (pd.Timestamp(d) + _LAG, _safe(v))
                 for d, v in q_eps_r.items()
@@ -964,17 +972,31 @@ with tab5:
             key=lambda x: x[0],
         )
 
-        if len(eps_schedule) < 4:
-            st.caption("Not enough quarterly EPS history (need ≥ 4 quarters).")
+        # Annual EPS schedule — used as fallback for dates without enough quarterly data.
+        # Annual EPS is already a TTM value at fiscal year-end.
+        a_schedule = sorted(
+            [
+                (pd.Timestamp(d) + _LAG, _safe(v))
+                for d, v in a_eps_r.items()
+                if not np.isnan(_safe(v))
+            ],
+            key=lambda x: x[0],
+        )
+
+        if not q_schedule and not a_schedule:
+            st.caption("Not enough EPS history for P/E chart.")
         else:
-            # For every price date, TTM EPS = sum of the 4 most recent quarterly
-            # EPS values whose report_date ≤ that price date.
+            # For every price date:
+            #   • Prefer rolling TTM from quarterly data (sum of 4 most recent known quarters)
+            #   • Fall back to most recent known annual EPS for older dates
             ttm_vals = []
             for price_date in px_close.index:
-                available = [v for d, v in eps_schedule if d <= price_date]
-                ttm_vals.append(
-                    float(sum(available[-4:])) if len(available) >= 4 else np.nan
-                )
+                q_avail = [v for d, v in q_schedule if d <= price_date]
+                if len(q_avail) >= 4:
+                    ttm_vals.append(float(sum(q_avail[-4:])))
+                else:
+                    a_avail = [v for d, v in a_schedule if d <= price_date]
+                    ttm_vals.append(a_avail[-1] if a_avail else np.nan)
 
             ttm_eps = pd.Series(ttm_vals, index=px_close.index, dtype=float)
             pe_raw  = (px_close / ttm_eps).where(ttm_eps > 0)
@@ -1090,8 +1112,8 @@ with tab5:
 
                 st.plotly_chart(fig_hpe, use_container_width=True)
                 st.caption(
-                    "TTM EPS = sum of 4 most recent quarterly diluted EPS values "
-                    "known on each date (45-day reporting lag). "
+                    "Recent P/E uses rolling TTM EPS (sum of 4 most recent quarterly reports, "
+                    "45-day lag). Older dates fall back to most recent annual EPS. "
                     "P/E hidden when TTM EPS ≤ 0."
                 )
 
