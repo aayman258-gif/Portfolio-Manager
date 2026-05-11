@@ -1,0 +1,63 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  validate:
+    name: Syntax & import check
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install streamlit pandas numpy plotly requests alpaca-py yfinance scipy PyPortfolioOpt
+
+      - name: Check Python syntax (all files)
+        run: |
+          find . -name "*.py" \
+            -not -path "./.git/*" \
+            -not -path "./pal-mcp-server/*" \
+            | xargs python -m py_compile && echo "All files compile cleanly"
+
+      - name: Check imports resolve (core modules)
+        run: |
+          python -c "
+          import sys
+          sys.path.insert(0, '.')
+          # Stub out streamlit session state for import-time checks
+          import unittest.mock as mock
+          import streamlit as st
+          modules = [
+              'data.cache',
+              'data.fred_client',
+              'data.calendar_data',
+              'data.alpaca_client',
+              'utils.portfolio_store',
+              'utils.carbon_theme',
+              'calculations.regime_detector',
+              'calculations.scoring_engine',
+              'calculations.optimizer',
+          ]
+          for m in modules:
+              try:
+                  __import__(m)
+                  print(f'  ok  {m}')
+              except Exception as e:
+                  print(f'  FAIL {m}: {e}')
+                  sys.exit(1)
+          print('All core imports OK')
+          "
