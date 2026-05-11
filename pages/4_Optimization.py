@@ -13,27 +13,32 @@ from pathlib import Path
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT, CARD, page_header
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, flex_table, ACCENT, CARD, page_header, top_nav
 
 from calculations.optimizer import RegimeAwareOptimizer
 from calculations.regime_detector import RegimeDetector
 from data.portfolio_loader import PortfolioLoader
 from data.market_data import MarketDataLoader
+from utils.portfolio_store import restore_portfolio_to_session
 
 
 # Page config
 st.set_page_config(
     page_title="Optimization & Rebalancing",
-    page_icon="⚖️",
+    page_icon="◈",
     layout="wide"
 )
 apply_carbon_theme()
+top_nav("Optimization")
 
-page_header("⚖️ Portfolio Optimization & Rebalancing", "Generate regime-aware optimal allocation and rebalancing recommendations")
+page_header("Portfolio Optimization & Rebalancing", "Generate regime-aware optimal allocation and rebalancing recommendations")
+
+# Auto-restore portfolio from disk if not in session
+restore_portfolio_to_session()
 
 # Check if portfolio exists
 if 'positions' not in st.session_state:
-    st.warning("⚠️ No portfolio loaded. Please go to Home page and load a portfolio first.")
+    st.warning("No portfolio loaded. Please go to Home page and load a portfolio first.")
     st.stop()
 
 positions_df = st.session_state['positions']
@@ -44,51 +49,38 @@ loader = PortfolioLoader()
 market_loader = MarketDataLoader()
 detector = RegimeDetector()
 
-# Sidebar settings
-st.sidebar.header("Optimization Settings")
-
-optimization_method = st.sidebar.selectbox(
-    "Optimization Objective",
-    options=['max_sharpe', 'min_volatility', 'max_quadratic_utility'],
-    format_func=lambda x: {
-        'max_sharpe': 'Maximize Sharpe Ratio',
-        'min_volatility': 'Minimize Volatility',
-        'max_quadratic_utility': 'Maximize Quadratic Utility'
-    }[x]
-)
-
-expected_return_method = st.sidebar.selectbox(
-    "Expected Return Model",
-    options=['capm', 'black_litterman', 'ema', 'mean_historical'],
-    format_func=lambda x: {
-        'capm':             'CAPM  (rf + β × ERP)',
-        'black_litterman':  'Black-Litterman  (CAPM prior)',
-        'ema':              'EMA Historical Mean',
-        'mean_historical':  'Simple Historical Mean',
-    }[x],
-    help=(
-        "CAPM uses market beta vs SPY. "
-        "Black-Litterman applies BL shrinkage with CAPM as the equilibrium prior. "
-        "Both are more stable out-of-sample than simple historical means."
-    ),
-)
-
-st.sidebar.divider()
-st.sidebar.header("💰 Rebalancing Controls")
-
-min_trade_threshold = st.sidebar.slider(
-    "Min Trade Size (% of portfolio)",
-    min_value=0.5, max_value=10.0, value=2.0, step=0.5,
-    help="Ignore rebalancing trades smaller than this % of portfolio value"
-)
-
-transaction_cost_bps = st.sidebar.number_input(
-    "Transaction Cost (bps per trade)",
-    min_value=0, max_value=100, value=10,
-    help="Basis points charged per trade (10 bps = 0.10%)"
-)
-
-st.sidebar.caption(f"Trades < {min_trade_threshold:.1f}% of portfolio filtered out.")
+# Inline settings
+_oc1, _oc2, _oc3, _oc4 = st.columns([2, 2, 1, 1])
+with _oc1:
+    optimization_method = st.selectbox(
+        "Optimization Objective",
+        options=['max_sharpe', 'min_volatility', 'max_quadratic_utility'],
+        format_func=lambda x: {
+            'max_sharpe': 'Maximize Sharpe Ratio',
+            'min_volatility': 'Minimize Volatility',
+            'max_quadratic_utility': 'Maximize Quad. Utility',
+        }[x],
+    )
+with _oc2:
+    expected_return_method = st.selectbox(
+        "Expected Return Model",
+        options=['capm', 'black_litterman', 'ema', 'mean_historical'],
+        format_func=lambda x: {
+            'capm':             'CAPM',
+            'black_litterman':  'Black-Litterman',
+            'ema':              'EMA Historical',
+            'mean_historical':  'Simple Historical',
+        }[x],
+    )
+with _oc3:
+    min_trade_threshold = st.slider(
+        "Min Trade (%)", min_value=0.5, max_value=10.0, value=2.0, step=0.5,
+    )
+with _oc4:
+    transaction_cost_bps = st.number_input(
+        "Tx Cost (bps)", min_value=0, max_value=100, value=10,
+    )
+st.caption(f"Trades < {min_trade_threshold:.1f}% of portfolio filtered out.")
 
 # Get current regime
 @st.cache_data
@@ -103,7 +95,7 @@ def get_current_regime():
 current_regime = get_current_regime()
 
 # Display current regime
-st.subheader(f"📊 Current Market Regime: {current_regime}")
+st.subheader(f"Current Market Regime: {current_regime}")
 
 regime_constraints = optimizer.regime_constraints.get(current_regime, {})
 
@@ -116,9 +108,9 @@ with col2:
 st.info(f"**{current_regime} Strategy:** {regime_constraints.get('description', '')}")
 
 # Run optimization
-st.subheader("⚙️ Running Optimization...")
+st.subheader("Running Optimization...")
 
-if st.button("🚀 Optimize Portfolio", type="primary"):
+if st.button("Optimize Portfolio", type="primary"):
     with st.spinner("Optimizing portfolio allocation..."):
         try:
             # Get tickers
@@ -145,7 +137,7 @@ if st.button("🚀 Optimize Portfolio", type="primary"):
             st.session_state['current_prices'] = current_prices
             st.session_state['total_value'] = total_value
 
-            st.success("✅ Optimization complete!")
+            st.success("Optimization complete!")
 
         except Exception as e:
             st.error(f"Error during optimization: {str(e)}")
@@ -160,7 +152,7 @@ if 'optimization_result' in st.session_state:
     cash_balance = st.session_state.get('cash_balance', 0.0)
 
     # Display optimal allocation
-    st.subheader("🎯 Optimal Allocation")
+    st.subheader("Optimal Allocation")
 
     _method_labels = {
         'capm': 'CAPM', 'black_litterman': 'Black-Litterman',
@@ -184,7 +176,7 @@ if 'optimization_result' in st.session_state:
         st.metric("Cash Allocation", f"{result['cash_allocation']:.1f}%")
 
     # Weights comparison
-    st.subheader("📊 Allocation Comparison")
+    st.subheader("Allocation Comparison")
 
     # Current weights (equities + actual cash)
     current_weights = {}
@@ -224,13 +216,13 @@ if 'optimization_result' in st.session_state:
         else:
             return 'background-color: lightyellow'
 
-    styled_comparison = comparison_df.style.format({
-        'Current %': '{:.2f}%',
-        'Optimal %': '{:.2f}%',
-        'Change %': '{:+.2f}%'
-    }).applymap(color_action, subset=['Action'])
-
-    st.dataframe(styled_comparison, use_container_width=True, hide_index=True)
+    flex_table(comparison_df, columns=[
+        {"key": "Ticker",    "label": "Ticker",    "width": "20%", "align": "left"},
+        {"key": "Current %", "label": "Current %", "width": "20%", "align": "right", "fmt": lambda x: f"{x:.2f}%", "numeric": True},
+        {"key": "Optimal %", "label": "Optimal %", "width": "20%", "align": "right", "fmt": lambda x: f"{x:.2f}%", "numeric": True},
+        {"key": "Change %",  "label": "Change %",  "width": "20%", "align": "right", "fmt": lambda x: f"{x:+.2f}%", "numeric": True, "color_scale": "rg"},
+        {"key": "Action",    "label": "Action",    "width": "20%", "align": "center"},
+    ], key="opt_comparison")
 
     # Visualization
     col1, col2 = st.columns(2)
@@ -265,7 +257,7 @@ if 'optimization_result' in st.session_state:
         st.plotly_chart(fig_optimal, use_container_width=True)
 
     # Bar chart comparison
-    st.subheader("📊 Weight Changes")
+    st.subheader("Weight Changes")
 
     comparison_no_cash = comparison_df[comparison_df['Ticker'] != 'CASH'].copy()
 
@@ -296,7 +288,7 @@ if 'optimization_result' in st.session_state:
     st.plotly_chart(fig_bar, use_container_width=True)
 
     # Rebalancing trades
-    st.subheader("🔄 Rebalancing Trades")
+    st.subheader("Rebalancing Trades")
 
     trades_df = optimizer.calculate_rebalancing_trades(
         current_positions=positions_df,
@@ -324,7 +316,7 @@ if 'optimization_result' in st.session_state:
                 + (f" ({len(trades_below)} below threshold filtered out)" if not trades_below.empty else "") + ":"
             )
         else:
-            st.success("✅ No trades exceed the minimum threshold. Portfolio effectively at target.")
+            st.success("No trades exceed the minimum threshold. Portfolio effectively at target.")
 
         if not trades_below.empty:
             st.caption(
@@ -351,30 +343,30 @@ if 'optimization_result' in st.session_state:
                 else:
                     return 'background-color: #FFB3B3'
 
-            styled_trades = trades_filtered.style.format({
-                'Shares': '{:.2f}',
-                'Price': '${:.2f}',
-                'Value': '${:,.2f}',
-                'Current Weight': '{:.2f}%',
-                'Target Weight': '{:.2f}%',
-                'Weight Change': '{:+.2f}%'
-            }).applymap(color_trade_action, subset=['Action'])
-
-            st.dataframe(styled_trades, use_container_width=True, hide_index=True)
+            flex_table(trades_filtered, columns=[
+                {"key": "Ticker",         "label": "Ticker",    "width": "12%", "align": "left"},
+                {"key": "Shares",         "label": "Shares",    "width": "10%", "align": "right", "fmt": lambda x: f"{x:.2f}", "numeric": True},
+                {"key": "Price",          "label": "Price",     "width": "11%", "align": "right", "fmt": lambda x: f"${x:.2f}", "numeric": True},
+                {"key": "Value",          "label": "Value",     "width": "13%", "align": "right", "fmt": lambda x: f"${x:,.2f}", "numeric": True},
+                {"key": "Current Weight", "label": "Cur. Wt.", "width": "11%", "align": "right", "fmt": lambda x: f"{x:.2f}%", "numeric": True},
+                {"key": "Target Weight",  "label": "Tgt. Wt.", "width": "11%", "align": "right", "fmt": lambda x: f"{x:.2f}%", "numeric": True},
+                {"key": "Weight Change",  "label": "Wt. Δ",    "width": "11%", "align": "right", "fmt": lambda x: f"{x:+.2f}%", "numeric": True, "color_scale": "rg"},
+                {"key": "Action",         "label": "Action",   "width": "21%", "align": "center"},
+            ], key="opt_trades")
 
             csv_trades = trades_filtered.to_csv(index=False)
             st.download_button(
-                label="📥 Download Rebalancing Trades (CSV)",
+                label="Download Rebalancing Trades (CSV)",
                 data=csv_trades,
                 file_name=f"rebalancing_trades_{pd.Timestamp.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
 
     else:
-        st.success("✅ Portfolio is already optimally allocated! No trades needed.")
+        st.success("Portfolio is already optimally allocated! No trades needed.")
 
     # Expected impact
-    st.subheader("📈 Expected Impact")
+    st.subheader("Expected Impact")
 
     st.markdown(f"""
     By rebalancing to the optimal allocation for the current **{current_regime}** regime:
@@ -388,7 +380,7 @@ if 'optimization_result' in st.session_state:
     """)
 
     # Correlation Matrix & Diversification Score
-    st.subheader("🔗 Correlation Matrix & Diversification")
+    st.subheader("Correlation Matrix & Diversification")
 
     with st.spinner("Calculating 60-day correlations..."):
         try:
@@ -460,7 +452,7 @@ if 'optimization_result' in st.session_state:
 
     # Risk warning
     st.warning("""
-    ⚠️ **Important Considerations:**
+    **Important Considerations:**
     - Historical optimization does not guarantee future results
     - Consider transaction costs and tax implications
     - Review individual position fundamentals before executing
@@ -469,10 +461,10 @@ if 'optimization_result' in st.session_state:
     """)
 
 else:
-    st.info("👆 Click **'Optimize Portfolio'** to generate optimal allocation and rebalancing recommendations.")
+    st.info("Click **'Optimize Portfolio'** to generate optimal allocation and rebalancing recommendations.")
 
 # Educational content
-with st.expander("📚 How Optimization Works"):
+with st.expander("How Optimization Works"):
     st.markdown("""
     ## Portfolio Optimization Methodology
 

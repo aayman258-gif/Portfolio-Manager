@@ -29,6 +29,43 @@ class RegimeAwareOptimizer:
 
     def __init__(self):
         self.regime_constraints = {
+            # ── New 6-signal regimes ──────────────────────────────────────────
+            'Risk-On': {
+                'max_equity_exposure': 1.0,
+                'risk_free_min': 0.0,
+                'description': 'Aggressive allocation — low vol, strong trend, constructive macro',
+            },
+            'Caution': {
+                'max_equity_exposure': 0.75,
+                'risk_free_min': 0.25,
+                'description': 'Moderate allocation — mixed signals, reduce beta',
+            },
+            'High Volatility': {
+                'max_equity_exposure': 0.55,
+                'risk_free_min': 0.45,
+                'description': 'Defensive allocation — elevated fear, capital preservation',
+            },
+            'Stagflation': {
+                'max_equity_exposure': 0.65,
+                'risk_free_min': 0.35,
+                'description': 'Real-asset tilt — commodities, TIPS, energy over growth',
+            },
+            'Recession': {
+                'max_equity_exposure': 0.45,
+                'risk_free_min': 0.55,
+                'description': 'Capital preservation mode — treasuries, cash, defensives',
+            },
+            'Mean Reversion': {
+                'max_equity_exposure': 0.75,
+                'risk_free_min': 0.25,
+                'description': 'Balanced allocation — range-bound, sector neutral',
+            },
+            'Uncertain': {
+                'max_equity_exposure': 0.65,
+                'risk_free_min': 0.35,
+                'description': 'Conservative allocation while regime is ambiguous',
+            },
+            # ── Legacy fallbacks (backward compat) ────────────────────────────
             'Low Vol': {
                 'max_equity_exposure': 1.0,
                 'risk_free_min': 0.0,
@@ -43,16 +80,6 @@ class RegimeAwareOptimizer:
                 'max_equity_exposure': 0.9,
                 'risk_free_min': 0.1,
                 'description': 'High exposure to capture trend',
-            },
-            'Mean Reversion': {
-                'max_equity_exposure': 0.8,
-                'risk_free_min': 0.2,
-                'description': 'Moderate allocation in choppy markets',
-            },
-            'Uncertain': {
-                'max_equity_exposure': 0.65,
-                'risk_free_min': 0.35,
-                'description': 'Conservative allocation while regime is ambiguous',
             },
         }
 
@@ -231,7 +258,7 @@ class RegimeAwareOptimizer:
         # Regime constraints
         constraints = self.regime_constraints.get(
             current_regime,
-            self.regime_constraints['High Vol'],
+            self.regime_constraints['Caution'],
         )
         max_equity = constraints['max_equity_exposure']
 

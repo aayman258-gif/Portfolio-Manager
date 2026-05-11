@@ -13,6 +13,124 @@ class OptionsRecommender:
     def __init__(self):
         # Strategy mappings for each regime
         self.regime_strategies = {
+            'Risk-On': [
+                {
+                    'name': 'Bull Call Spread',
+                    'type': 'Directional/Bullish',
+                    'description': 'Limited risk bullish play — buy lower strike, sell upper strike',
+                    'structure': 'Long ATM call + Short OTM call',
+                    'best_when': 'Strong uptrend, constructive macro, moderate bullish conviction',
+                    'risk': 'Limited to debit paid',
+                    'complexity': 'Intermediate'
+                },
+                {
+                    'name': 'Cash-Secured Put',
+                    'type': 'Income/Wheel',
+                    'description': 'Sell OTM puts to generate income or acquire stock at discount',
+                    'structure': 'Short OTM put with cash reserved',
+                    'best_when': 'Bullish-to-neutral, low vol, want to own at lower price',
+                    'risk': 'Medium',
+                    'complexity': 'Intermediate'
+                },
+                {
+                    'name': 'Covered Call',
+                    'type': 'Income/Enhancement',
+                    'description': 'Sell calls against existing stock to enhance yield',
+                    'structure': 'Long 100 shares + Short OTM call',
+                    'best_when': 'Own stock, neutral to slightly bullish, enhance income',
+                    'risk': 'Low',
+                    'complexity': 'Beginner'
+                },
+            ],
+            'Caution': [
+                {
+                    'name': 'Iron Condor',
+                    'type': 'Income/Theta',
+                    'description': 'Range-bound income play with defined risk',
+                    'structure': 'Short call spread + Short put spread',
+                    'best_when': 'Choppy, transitional markets — expect consolidation',
+                    'risk': 'Limited to wing width',
+                    'complexity': 'Advanced'
+                },
+                {
+                    'name': 'Protective Put',
+                    'type': 'Hedging/Insurance',
+                    'description': 'Buy puts to hedge long stock against downside',
+                    'structure': 'Long 100 shares + Long OTM put',
+                    'best_when': 'Hold long equity, uncertain about regime direction',
+                    'risk': 'Low (premium cost)',
+                    'complexity': 'Beginner'
+                },
+            ],
+            'High Volatility': [
+                {
+                    'name': 'Long Straddle',
+                    'type': 'Volatility Expansion',
+                    'description': 'Buy ATM call and put to profit from large move in either direction',
+                    'structure': 'Long ATM call + Long ATM put',
+                    'best_when': 'Expect volatility explosion, uncertain direction, before events',
+                    'risk': 'High (premium loss if no move)',
+                    'complexity': 'Intermediate'
+                },
+                {
+                    'name': 'Long Strangle',
+                    'type': 'Volatility Expansion',
+                    'description': 'Buy OTM call and put for cheaper volatility play',
+                    'structure': 'Long OTM call + Long OTM put',
+                    'best_when': 'Expect big move, lower cost than straddle',
+                    'risk': 'High (premium loss)',
+                    'complexity': 'Intermediate'
+                },
+                {
+                    'name': 'Protective Put',
+                    'type': 'Hedging/Insurance',
+                    'description': 'Buy puts to hedge long stock position',
+                    'structure': 'Long 100 shares + Long OTM put',
+                    'best_when': 'Own stock, expect volatility, want downside protection',
+                    'risk': 'Low (premium cost)',
+                    'complexity': 'Beginner'
+                }
+            ],
+            'Stagflation': [
+                {
+                    'name': 'Bear Put Spread',
+                    'type': 'Directional/Bearish',
+                    'description': 'Limited risk bearish play — hedges equity exposure',
+                    'structure': 'Long ATM put + Short OTM put',
+                    'best_when': 'Stagflationary pressure hurts growth equities',
+                    'risk': 'Limited to debit paid',
+                    'complexity': 'Intermediate'
+                },
+                {
+                    'name': 'Iron Condor',
+                    'type': 'Income/Theta',
+                    'description': 'Range-bound income in choppy stagflation environment',
+                    'structure': 'Short call spread + Short put spread',
+                    'best_when': 'Sideways markets with elevated IV',
+                    'risk': 'Limited to wing width',
+                    'complexity': 'Advanced'
+                },
+            ],
+            'Recession': [
+                {
+                    'name': 'Bear Put Spread',
+                    'type': 'Directional/Bearish',
+                    'description': 'Defined-risk bearish hedge for recessionary environment',
+                    'structure': 'Long ATM put + Short OTM put',
+                    'best_when': 'Leading indicators inverted, credit wide, unemployment rising',
+                    'risk': 'Limited to debit paid',
+                    'complexity': 'Intermediate'
+                },
+                {
+                    'name': 'Protective Put',
+                    'type': 'Hedging/Insurance',
+                    'description': 'Portfolio insurance during drawdown',
+                    'structure': 'Long 100 shares + Long OTM put',
+                    'best_when': 'Must hold equity but want downside floor',
+                    'risk': 'Low (premium cost)',
+                    'complexity': 'Beginner'
+                },
+            ],
             'Low Vol': [
                 {
                     'name': 'Iron Condor',
@@ -161,7 +279,7 @@ class OptionsRecommender:
         # Standard deviations for strike selection
         one_std_move = current_price * volatility * np.sqrt(days_to_expiry/252)
 
-        if regime == 'Low Vol':
+        if regime in ('Low Vol', 'Risk-On'):
             # Iron Condor strikes
             recommendations['Iron Condor'] = {
                 'short_put_strike': round(current_price - 1.5 * one_std_move, 2),
@@ -184,7 +302,7 @@ class OptionsRecommender:
                 'rationale': 'Sell 5% OTM call, collect premium while holding stock'
             }
 
-        elif regime == 'High Vol':
+        elif regime in ('High Vol', 'High Volatility', 'Recession'):
             # Long Straddle
             recommendations['Long Straddle'] = {
                 'strike': round(current_price, 2),
@@ -207,7 +325,7 @@ class OptionsRecommender:
                 'rationale': '5% OTM protection, covers downside below this level'
             }
 
-        elif regime == 'Trending':
+        elif regime in ('Trending', 'Stagflation', 'Caution'):
             if trend_direction > 0:  # Uptrend
                 recommendations['Bull Call Spread'] = {
                     'long_strike': round(current_price, 2),
@@ -239,7 +357,7 @@ class OptionsRecommender:
                     'rationale': 'ATM - wait for trend confirmation'
                 }
 
-        elif regime == 'Mean Reversion':
+        elif regime in ('Mean Reversion', 'Uncertain'):
             # Short Strangle
             recommendations['Short Strangle'] = {
                 'call_strike': round(current_price + one_std_move, 2),
@@ -276,13 +394,49 @@ class OptionsRecommender:
         """Get position sizing for options based on regime"""
 
         regime_risk = {
+            'Risk-On': {
+                'max_risk_per_trade': min(risk_per_trade * 1.5, 0.03),
+                'max_positions': 6,
+                'notes': 'Constructive environment — scale up premium selling and directional plays'
+            },
+            'Caution': {
+                'max_risk_per_trade': risk_per_trade * 0.80,
+                'max_positions': 4,
+                'notes': 'Reduce size, prefer defined-risk strategies'
+            },
+            'High Volatility': {
+                'max_risk_per_trade': risk_per_trade * 0.50,
+                'max_positions': 3,
+                'notes': 'High fear — reduce size, use protective structures'
+            },
+            'Stagflation': {
+                'max_risk_per_trade': risk_per_trade * 0.70,
+                'max_positions': 4,
+                'notes': 'Real-asset tilt — bearish spreads on growth, neutral on commodities'
+            },
+            'Recession': {
+                'max_risk_per_trade': risk_per_trade * 0.40,
+                'max_positions': 2,
+                'notes': 'Capital preservation mode — minimal speculative exposure'
+            },
+            'Mean Reversion': {
+                'max_risk_per_trade': risk_per_trade,
+                'max_positions': 4,
+                'notes': 'Range-bound strategies — sell premium, iron condors'
+            },
+            'Uncertain': {
+                'max_risk_per_trade': risk_per_trade * 0.60,
+                'max_positions': 3,
+                'notes': 'Undefined regime — reduce size until clarity emerges'
+            },
+            # legacy
             'Low Vol': {
-                'max_risk_per_trade': min(risk_per_trade * 1.5, 0.03),  # Can risk more in calm markets
+                'max_risk_per_trade': min(risk_per_trade * 1.5, 0.03),
                 'max_positions': 5,
                 'notes': 'Low risk environment, can scale up premium selling'
             },
             'High Vol': {
-                'max_risk_per_trade': risk_per_trade * 0.5,  # Reduce risk in volatile markets
+                'max_risk_per_trade': risk_per_trade * 0.5,
                 'max_positions': 3,
                 'notes': 'High risk environment, reduce size and be selective'
             },
@@ -291,14 +445,9 @@ class OptionsRecommender:
                 'max_positions': 4,
                 'notes': 'Moderate risk, focus on directional plays'
             },
-            'Mean Reversion': {
-                'max_risk_per_trade': risk_per_trade,
-                'max_positions': 4,
-                'notes': 'Moderate risk, focus on range-bound strategies'
-            }
         }
 
-        sizing = regime_risk.get(regime, regime_risk['High Vol'])
+        sizing = regime_risk.get(regime, regime_risk['Caution'])
         sizing['max_dollar_risk'] = account_size * sizing['max_risk_per_trade']
 
         return sizing

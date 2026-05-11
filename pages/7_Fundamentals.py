@@ -17,13 +17,14 @@ import sys
 from pathlib import Path
 
 sys.path.append(str(Path(__file__).parent.parent))
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, flex_table, page_header, top_nav
 
 # ── Page config ───────────────────────────────────────────────────────────────
-st.set_page_config(page_title="Stock Screener", page_icon="🔍", layout="wide")
+st.set_page_config(page_title="Stock Screener", page_icon="◈", layout="wide")
 apply_carbon_theme()
+top_nav("Fundamentals")
 page_header(
-    "🔍 Stock Screener & Fundamentals",
+    "Stock Screener & Fundamentals",
     "Financial statements · scoring · peer comparison · screening",
 )
 
@@ -326,35 +327,35 @@ def _compute_scores(nfo: dict, stmts: dict) -> dict:
         "Earnings Quality": _score_eq(ocf_ni),
     }
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
-st.sidebar.header("⚙️ Configuration")
-
-primary = st.sidebar.text_input("Primary Ticker", value="AAPL").upper().strip()
-
-_positions = st.session_state.get("positions", pd.DataFrame())
-_ptickers: list = []
-if isinstance(_positions, pd.DataFrame) and not _positions.empty:
-    _ptickers = [str(t) for t in _positions["ticker"].unique()]
-
-_peer_defaults = [t for t in _ptickers if t != primary][:4]
-comp_raw = st.sidebar.text_input(
-    "Comparison / Peer Tickers (comma-separated)",
-    value=", ".join(_peer_defaults),
-    help="Portfolio tickers pre-populated",
-)
-comp_tickers = [t.strip().upper() for t in comp_raw.split(",") if t.strip()]
-
-period_mode = st.sidebar.radio("Period", ["Annual", "Quarterly"], horizontal=True)
-if period_mode == "Annual":
-    lb_opts = {"1Y": 1, "3Y": 3, "5Y": 5, "Max": 10}
-    n_periods = lb_opts[st.sidebar.selectbox("Lookback", list(lb_opts), index=2)]
-else:
-    lb_opts = {"4Q": 4, "8Q": 8, "12Q": 12, "Max": 20}
-    n_periods = lb_opts[st.sidebar.selectbox("Lookback", list(lb_opts), index=1)]
+# ── Inline controls ───────────────────────────────────────────────────────────
+_fc1, _fc2, _fc3, _fc4 = st.columns([1.5, 3, 1, 1])
+with _fc1:
+    primary = st.text_input("Primary Ticker", value="AAPL", placeholder="AAPL").upper().strip()
+with _fc2:
+    _positions = st.session_state.get("positions", pd.DataFrame())
+    _ptickers: list = []
+    if isinstance(_positions, pd.DataFrame) and not _positions.empty:
+        _ptickers = [str(t) for t in _positions["ticker"].unique()]
+    _peer_defaults = [t for t in _ptickers if t != primary][:4]
+    comp_raw = st.text_input(
+        "Comparison / Peer Tickers (comma-separated)",
+        value=", ".join(_peer_defaults),
+        help="Portfolio tickers pre-populated",
+    )
+    comp_tickers = [t.strip().upper() for t in comp_raw.split(",") if t.strip()]
+with _fc3:
+    period_mode = st.radio("Period", ["Annual", "Quarterly"], horizontal=False)
+with _fc4:
+    if period_mode == "Annual":
+        lb_opts = {"1Y": 1, "3Y": 3, "5Y": 5, "Max": 10}
+        n_periods = lb_opts[st.selectbox("Lookback", list(lb_opts), index=2)]
+    else:
+        lb_opts = {"4Q": 4, "8Q": 8, "12Q": 12, "Max": 20}
+        n_periods = lb_opts[st.selectbox("Lookback", list(lb_opts), index=1)]
 
 # ── Load primary ticker data ──────────────────────────────────────────────────
 if not primary:
-    st.info("Enter a ticker in the sidebar to begin.")
+    st.info("Enter a ticker above to begin.")
     st.stop()
 
 with st.spinner(f"Loading {primary}…"):
@@ -407,12 +408,12 @@ st.markdown(
 
 # ── TABS ───────────────────────────────────────────────────────────────────────
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
-    "📊 Overview",
-    "📋 Income Statement",
-    "🏦 Balance Sheet",
-    "💵 Cash Flow",
-    "📈 Valuation & Peers",
-    "🔎 Screener",
+    "Overview",
+    "Income Statement",
+    "Balance Sheet",
+    "Cash Flow",
+    "Valuation & Peers",
+    "Screener",
 ])
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -532,7 +533,7 @@ with tab1:
 
     desc = nfo.get("longBusinessSummary", "")
     if desc:
-        with st.expander("📄 Business Description"):
+        with st.expander("Business Description"):
             st.write(desc)
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -929,16 +930,21 @@ with tab5:
 
             # Full peer table
             st.subheader("Full Peer Metrics Table")
-            disp = peer_df.copy()
-            for c in ["Net Margin", "Gross Margin", "ROE", "ROA", "Rev Growth", "EPS Growth"]:
-                disp[c] = disp[c].apply(lambda v: f"{v*100:.1f}%" if not np.isnan(v) else "—")
-            for c in ["Trailing P/E", "Forward P/E", "EV/EBITDA", "P/S", "P/B", "D/E", "Beta"]:
-                disp[c] = disp[c].apply(lambda v: f"{v:.1f}" if not np.isnan(v) else "—")
-            disp["Market Cap"] = disp["Market Cap"].apply(_fv)
-            disp["Price"] = disp["Price"].apply(
-                lambda v: f"${v:.2f}" if not np.isnan(v) else "—"
-            )
-            st.dataframe(disp, use_container_width=True, hide_index=True)
+            _nan1f = lambda v: f"{v:.1f}" if not np.isnan(v) else "—"
+            _nanpct = lambda v: f"{v*100:.1f}%" if not np.isnan(v) else "—"
+            flex_table(peer_df, columns=[
+                {"key": "Ticker",       "label": "Ticker",    "width": "8%",  "align": "left"},
+                {"key": "Price",        "label": "Price",     "width": "9%",  "align": "right", "fmt": lambda v: f"${v:.2f}" if not np.isnan(v) else "—", "numeric": True},
+                {"key": "Market Cap",   "label": "Mkt Cap",   "width": "10%", "align": "right", "fmt": _fv, "numeric": True},
+                {"key": "Trailing P/E", "label": "Trail P/E", "width": "9%",  "align": "right", "fmt": _nan1f, "numeric": True},
+                {"key": "Forward P/E",  "label": "Fwd P/E",  "width": "9%",  "align": "right", "fmt": _nan1f, "numeric": True},
+                {"key": "EV/EBITDA",    "label": "EV/EBITDA", "width": "9%",  "align": "right", "fmt": _nan1f, "numeric": True},
+                {"key": "Net Margin",   "label": "Net Mgn",   "width": "9%",  "align": "right", "fmt": _nanpct, "numeric": True, "color_scale": "rg"},
+                {"key": "Gross Margin", "label": "Grs Mgn",   "width": "9%",  "align": "right", "fmt": _nanpct, "numeric": True, "color_scale": "rg"},
+                {"key": "ROE",          "label": "ROE",        "width": "9%",  "align": "right", "fmt": _nanpct, "numeric": True, "color_scale": "rg"},
+                {"key": "Beta",         "label": "Beta",       "width": "7%",  "align": "right", "fmt": _nan1f, "numeric": True},
+                {"key": "D/E",          "label": "D/E",        "width": "12%", "align": "right", "fmt": _nan1f, "numeric": True},
+            ], key="fund_peers")
 
     # Historical P/E — daily granularity, rolling TTM EPS
     st.divider()
@@ -1121,7 +1127,7 @@ with tab5:
 # TAB 6 — SCREENER
 # ═════════════════════════════════════════════════════════════════════════════
 with tab6:
-    st.subheader("🔎 Fundamental Screener")
+    st.subheader("Fundamental Screener")
     st.markdown(
         "Screen any list of tickers against fundamental thresholds. "
         "Portfolio tickers are pre-loaded; add more below."
@@ -1224,27 +1230,20 @@ with tab6:
 
                 st.success(f"**{len(res_df)}** of {len(scr_tickers)} tickers passed.")
 
-                res_disp = res_df.copy()
-                res_disp["Market Cap"] = res_disp["Market Cap"].apply(_fv)
-                st.dataframe(
-                    res_disp.style
-                    .format({
-                        "Price":          "${:.2f}",
-                        "P/E":            "{:.1f}",
-                        "EV/EBITDA":      "{:.1f}",
-                        "P/S":            "{:.1f}",
-                        "Net Margin %":   "{:.1f}%",
-                        "Gross Margin %": "{:.1f}%",
-                        "ROE %":          "{:.1f}%",
-                        "Rev Growth %":   "{:.1f}%",
-                        "D/E":            "{:.1f}",
-                        "Current Ratio":  "{:.2f}",
-                        "FCF ($M)":       "${:,.0f}",
-                        "Score":          "{:.0f}",
-                    }, na_rep="—")
-                    .background_gradient(subset=["Score"], cmap="RdYlGn", vmin=0, vmax=100),
-                    use_container_width=True, hide_index=True,
-                )
+                flex_table(res_df, columns=[
+                    {"key": "Ticker",        "label": "Ticker",    "width": "8%",  "align": "left"},
+                    {"key": "Score",         "label": "Score",     "width": "8%",  "align": "right", "fmt": lambda x: f"{x:.0f}", "numeric": True, "color_scale": "rg"},
+                    {"key": "Price",         "label": "Price",     "width": "8%",  "align": "right", "fmt": lambda x: f"${x:.2f}", "numeric": True},
+                    {"key": "Market Cap",    "label": "Mkt Cap",   "width": "9%",  "align": "right", "fmt": _fv, "numeric": True},
+                    {"key": "P/E",           "label": "P/E",       "width": "7%",  "align": "right", "fmt": lambda x: f"{x:.1f}", "numeric": True},
+                    {"key": "EV/EBITDA",     "label": "EV/EBITDA", "width": "9%",  "align": "right", "fmt": lambda x: f"{x:.1f}", "numeric": True},
+                    {"key": "Net Margin %",  "label": "Net Mgn",   "width": "9%",  "align": "right", "fmt": lambda x: f"{x:.1f}%", "numeric": True, "color_scale": "rg"},
+                    {"key": "Gross Margin %","label": "Grs Mgn",   "width": "9%",  "align": "right", "fmt": lambda x: f"{x:.1f}%", "numeric": True, "color_scale": "rg"},
+                    {"key": "ROE %",         "label": "ROE %",     "width": "8%",  "align": "right", "fmt": lambda x: f"{x:.1f}%", "numeric": True, "color_scale": "rg"},
+                    {"key": "D/E",           "label": "D/E",       "width": "7%",  "align": "right", "fmt": lambda x: f"{x:.1f}", "numeric": True},
+                    {"key": "Current Ratio", "label": "Curr Rat.", "width": "9%",  "align": "right", "fmt": lambda x: f"{x:.2f}", "numeric": True},
+                    {"key": "FCF ($M)",      "label": "FCF ($M)",  "width": "9%",  "align": "right", "fmt": lambda x: f"${x:,.0f}", "numeric": True},
+                ], key="fund_screener")
 
                 st.download_button(
                     "⬇ Download Results CSV",

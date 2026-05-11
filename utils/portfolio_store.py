@@ -69,6 +69,30 @@ def portfolio_file_exists() -> bool:
     return _STORE_PATH.exists()
 
 
+def restore_portfolio_to_session() -> bool:
+    """
+    If st.session_state['positions'] is not set but a saved portfolio file
+    exists, load it automatically.  Call this at the top of any page that
+    requires a loaded portfolio.
+
+    Returns True if positions are now available in session state, False otherwise.
+    """
+    import streamlit as st
+
+    if st.session_state.get("positions") is not None:
+        return True
+
+    df = load_portfolio()
+    if df is not None and not df.empty:
+        st.session_state["positions"] = df
+        # Also restore options positions if not already present
+        if not st.session_state.get("options_positions"):
+            st.session_state["options_positions"] = load_options_positions()
+        return True
+
+    return False
+
+
 def save_options_positions(options: list) -> bool:
     """Append/overwrite options positions into the portfolio JSON file."""
     try:

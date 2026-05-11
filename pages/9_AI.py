@@ -17,13 +17,13 @@ from typing import Any, Dict, Iterable, List, Optional, Tuple
 import pandas as pd
 import plotly.express as px
 import streamlit as st
-import yfinance as yf
+import yfinance as yf   # kept for ticker metadata (fast_info)
 from openai import OpenAI
 
 # Add parent directory to path (same pattern as other pages)
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, page_header
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, flex_table, page_header, top_nav
 
 from calculations.optimizer import RegimeAwareOptimizer
 from calculations.regime_detector import RegimeDetector
@@ -34,10 +34,11 @@ from data.market_data import MarketDataLoader
 
 st.set_page_config(
     page_title="AI Assistant",
-    page_icon="🤖",
+    page_icon="◈",
     layout="wide",
 )
 apply_carbon_theme()
+top_nav("AI")
 
 PLOTLY_TEMPLATE = "plotly_dark"  # kept for reference; charts use carbon_plotly_layout
 
@@ -357,13 +358,17 @@ def _render_optimizer_result(result: Dict[str, Any]) -> None:
     weights = result.get("weights", {})
     if isinstance(weights, dict) and weights:
         wdf = (
-            pd.DataFrame([{"Ticker": k, "Weight": f"{v*100:.1f}%", "weight_raw": v}
+            pd.DataFrame([{"Ticker": k, "Weight": v * 100}
                           for k, v in weights.items()])
-            .sort_values("weight_raw", ascending=False)
+            .sort_values("Weight", ascending=False)
         )
 
         st.markdown("**Target Weights**")
-        st.dataframe(wdf[["Ticker", "Weight"]], use_container_width=True, hide_index=True)
+        flex_table(wdf, columns=[
+            {"key": "Ticker", "label": "Ticker", "width": "50%", "align": "left"},
+            {"key": "Weight", "label": "Weight", "width": "50%", "align": "right",
+             "fmt": lambda x: f"{x:.1f}%", "numeric": True, "color_scale": "rg"},
+        ], key="ai_weights")
 
         fig = px.bar(
             wdf,
@@ -392,13 +397,11 @@ def _validate_ticker(ticker: str) -> Dict[str, Any]:
     if not t:
         return {"ticker": ticker, "valid": False, "error": "Empty ticker"}
     try:
-        hist = yf.download(t, period="6mo", interval="1d", progress=False, auto_adjust=True, threads=False)
+        import sys as _s; _s.path.insert(0, str(__import__('pathlib').Path(__file__).parent.parent))
+        from data.alpaca_client import get_bars as _alpaca_bars
+        hist = _alpaca_bars(t, period="6mo")
         if hist is None or hist.empty:
             return {"ticker": t, "valid": False, "error": "No price history returned"}
-
-        # Handle MultiIndex columns (newer yfinance versions)
-        if isinstance(hist.columns, pd.MultiIndex):
-            hist.columns = hist.columns.get_level_values(0)
 
         if "Close" not in hist.columns:
             return {"ticker": t, "valid": False, "error": "Close price column not found"}
@@ -491,7 +494,7 @@ def _render_suggestion_cards(action_result: Dict[str, Any]) -> None:
                 if sector:
                     st.caption(f"Sector: {sector}")
             with cols[1]:
-                st.metric("Data Valid", "✅ Yes" if valid else "❌ No")
+                st.metric("Data Valid", "Yes" if valid else "No")
             with cols[2]:
                 st.metric("Last Close", f"${last_close:.2f}" if isinstance(last_close, float) else "—")
             with cols[3]:
@@ -664,72 +667,60 @@ def _clear_chat() -> None:
 # ─── Sidebar ─────────────────────────────────────────────────────────────────────
 
 def _render_sidebar() -> None:
-    with st.sidebar:
-        st.markdown("## AI Assistant Controls")
+    """Render AI controls inline (sidebar removed)."""
+    _ai_c1, _ai_c2, _ai_c3 = st.columns([2, 1, 1])
 
+    with _ai_c1:
         if MODEL_KEY not in st.session_state:
             st.session_state[MODEL_KEY] = DEFAULT_MODEL
-
         st.session_state[MODEL_KEY] = st.selectbox(
             "Model",
             options=AVAILABLE_MODELS,
             index=AVAILABLE_MODELS.index(st.session_state[MODEL_KEY])
-            if st.session_state[MODEL_KEY] in AVAILABLE_MODELS
-            else 0,
+            if st.session_state[MODEL_KEY] in AVAILABLE_MODELS else 0,
+            key="ai_model_select",
         )
 
-        if st.button("🗑️ Clear Chat", use_container_width=True):
+    with _ai_c2:
+        st.write("")
+        st.write("")
+        if st.button("Clear Chat", use_container_width=True):
             _clear_chat()
             st.rerun()
 
-        st.divider()
-        st.markdown("### Portfolio Context")
+    with _ai_c3:
+        st.caption("API key from `OPENROUTER_API_KEY`")
 
-        positions_df = st.session_state.get("positions")
-        current_prices = st.session_state.get("current_prices")
-        total_value = st.session_state.get("total_value")
-        opt_result = st.session_state.get("optimization_result")
+    # Portfolio context status strip
+    positions_df   = st.session_state.get("positions")
+    current_prices = st.session_state.get("current_prices")
+    total_value    = st.session_state.get("total_value")
+    opt_result     = st.session_state.get("optimization_result")
 
-        if isinstance(positions_df, pd.DataFrame) and len(positions_df) > 0:
-            tickers = _get_tickers_from_session()
-            st.success(f"Positions: {len(positions_df)} rows")
-            st.caption(", ".join(tickers[:10]) + ("…" if len(tickers) > 10 else ""))
-        else:
-            st.warning("No positions loaded")
+    _ctx_items = []
+    if isinstance(positions_df, pd.DataFrame) and len(positions_df) > 0:
+        _ctx_items.append(f"✓ {len(positions_df)} positions")
+    else:
+        _ctx_items.append("✗ no positions")
+    if isinstance(current_prices, dict) and current_prices:
+        _ctx_items.append(f"✓ {len(current_prices)} prices")
+    tv = _safe_float(total_value)
+    if tv is not None:
+        _ctx_items.append(f"✓ ${tv:,.0f}")
+    try:
+        regime, _ = _compute_current_regime()
+        if regime:
+            _ctx_items.append(f"regime: {regime}")
+    except Exception:
+        pass
 
-        if isinstance(current_prices, dict) and current_prices:
-            st.success(f"Prices: {len(current_prices)} tickers")
-        else:
-            st.warning("No prices loaded")
-
-        tv = _safe_float(total_value)
-        if tv is not None:
-            st.success(f"Portfolio value: ${tv:,.0f}")
-        else:
-            st.warning("Total value not set")
-
-        if isinstance(opt_result, dict) and opt_result:
-            st.success("Optimization result: present")
-        else:
-            st.info("No optimization result yet")
-
-        try:
-            regime, _ = _compute_current_regime()
-            if regime:
-                st.success(f"Regime: {regime}")
-            else:
-                st.warning("Regime: unavailable")
-        except Exception:
-            st.warning("Regime: error computing")
-
-        st.divider()
-        st.caption("API key read from st.secrets or OPENROUTER_API_KEY env var.")
+    st.caption("  ·  ".join(_ctx_items))
 
 
 # ─── Main ─────────────────────────────────────────────────────────────────────────
 
 def main() -> None:
-    page_header("🤖 AI Portfolio Assistant", "Ask me about your portfolio, regime, optimization, or new position ideas.")
+    page_header("AI Portfolio Assistant", "Ask me about your portfolio, regime, optimization, or new position ideas.")
 
     _render_sidebar()
     _init_chat()

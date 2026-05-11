@@ -21,12 +21,12 @@ from calculations.options_recommender import OptionsRecommender
 from calculations.probability_utils import probability_of_profit, expected_value
 from calculations.regime_detector import RegimeDetector
 from data.market_data import MarketDataLoader
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, regime_color, page_header
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, flex_table, regime_color, page_header
 
-st.set_page_config(page_title="Trade Suggestions", page_icon="💡", layout="wide")
+st.set_page_config(page_title="Trade Suggestions", page_icon="◈", layout="wide")
 apply_carbon_theme()
 
-page_header("💡 Trade Suggestions", "Algorithm-scored strategy recommendations based on IV rank, regime & direction")
+page_header("Trade Suggestions", "Algorithm-scored strategy recommendations based on IV rank, regime & direction")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants
@@ -45,11 +45,19 @@ STRATEGY_PROFILES = {
 }
 
 REGIME_PREFERRED = {
-    'Low Vol':        ['Iron Condor', 'Iron Butterfly', 'Call Butterfly', 'Bull Call Spread'],
-    'High Vol':       ['Long Straddle', 'Long Strangle', 'Bull Call Spread', 'Bear Put Spread'],
-    'Trending':       ['Bull Call Spread', 'Bear Put Spread', 'Long Call', 'Long Put', 'Call Butterfly'],
-    'Mean Reversion': ['Short Strangle', 'Iron Butterfly', 'Iron Condor'],
-    'Unknown':        ['Bull Call Spread', 'Iron Condor'],
+    # New 6-signal regimes
+    'Risk-On':         ['Bull Call Spread', 'Long Call', 'Call Butterfly', 'Iron Condor'],
+    'Caution':         ['Bull Call Spread', 'Bear Put Spread', 'Iron Condor', 'Short Strangle'],
+    'High Volatility': ['Long Straddle', 'Long Strangle', 'Bull Call Spread', 'Bear Put Spread'],
+    'Stagflation':     ['Bear Put Spread', 'Long Put', 'Iron Condor', 'Short Strangle'],
+    'Recession':       ['Bear Put Spread', 'Long Put', 'Long Straddle', 'Iron Condor'],
+    'Mean Reversion':  ['Short Strangle', 'Iron Butterfly', 'Iron Condor'],
+    'Uncertain':       ['Iron Condor', 'Short Strangle', 'Bull Call Spread'],
+    # Legacy fallbacks
+    'Low Vol':         ['Iron Condor', 'Iron Butterfly', 'Call Butterfly', 'Bull Call Spread'],
+    'High Vol':        ['Long Straddle', 'Long Strangle', 'Bull Call Spread', 'Bear Put Spread'],
+    'Trending':        ['Bull Call Spread', 'Bear Put Spread', 'Long Call', 'Long Put', 'Call Butterfly'],
+    'Unknown':         ['Bull Call Spread', 'Iron Condor'],
 }
 
 _RISK_FREE_RATE = 0.045
@@ -141,7 +149,7 @@ def score_strategy(name: str, view: str, iv_rank: float,
     else:
         if risk_tolerance < 2:
             score -= 25
-            reasons.append("⚠️ Undefined risk strategy penalised for conservative tolerance")
+            reasons.append("Undefined risk strategy penalised for conservative tolerance")
         else:
             reasons.append("Undefined risk accepted given higher risk tolerance")
 
@@ -188,7 +196,7 @@ target_dte = st.sidebar.selectbox(
                            else f"{d}d ({d//365}yr)")
 )
 
-if st.sidebar.button("⚡ Generate Suggestions", type="primary", use_container_width=True):
+if st.sidebar.button("Generate Suggestions", type="primary", use_container_width=True):
     st.session_state['ts_ticker']  = ticker
     st.session_state['ts_view']    = directional_view
     st.session_state['ts_acct']    = account_size
@@ -197,7 +205,7 @@ if st.sidebar.button("⚡ Generate Suggestions", type="primary", use_container_w
     st.session_state['ts_loaded']  = True
 
 if not st.session_state.get('ts_loaded', False):
-    st.info("👈 Configure your inputs in the sidebar and click **Generate Suggestions**.")
+    st.info("Configure your inputs in the sidebar and click **Generate Suggestions**.")
     st.stop()
 
 ticker   = st.session_state['ts_ticker']
@@ -266,17 +274,20 @@ infer_reasons = []
 
 if view == 'Let Algorithm Decide':
     # 1. Regime gives the primary signal
-    if current_regime == 'High Vol':
+    if current_regime in ('High Volatility', 'High Vol'):
         inferred_view = 'Volatile / Expecting Big Move'
-        infer_reasons.append(f"Regime is **High Vol** — elevated volatility favours non-directional volatility strategies")
-    elif current_regime == 'Low Vol':
+        infer_reasons.append(f"Regime is **{current_regime}** — elevated volatility favours non-directional volatility strategies")
+    elif current_regime in ('Recession', 'Stagflation'):
+        inferred_view = 'Bearish'
+        infer_reasons.append(f"Regime is **{current_regime}** — defensive/bearish tilt is appropriate")
+    elif current_regime in ('Low Vol', 'Risk-On'):
         inferred_view = 'Neutral'
-        infer_reasons.append(f"Regime is **Low Vol** — calm, range-bound conditions favour premium-selling neutral strategies")
-    elif current_regime == 'Mean Reversion':
+        infer_reasons.append(f"Regime is **{current_regime}** — calm, constructive conditions favour premium-selling neutral strategies")
+    elif current_regime in ('Mean Reversion', 'Caution', 'Uncertain'):
         inferred_view = 'Neutral'
-        infer_reasons.append(f"Regime is **Mean Reversion** — choppy conditions favour neutral range strategies")
+        infer_reasons.append(f"Regime is **{current_regime}** — choppy/cautious conditions favour neutral range strategies")
     else:
-        # Trending or Unknown: use price momentum to pick direction
+        # Risk-On / Trending / Unknown: use price momentum to pick direction
         try:
             _px = yf.Ticker(ticker).history(period='3mo')['Close']
             _ret_20  = float(_px.iloc[-1] / _px.iloc[-20]  - 1) if len(_px) >= 20  else 0
@@ -303,8 +314,8 @@ if view == 'Let Algorithm Decide':
             infer_reasons.append(
                 f"20-day return is **{_ret_20:+.1%}** with mixed MA signals — no strong directional edge, defaulting to Neutral"
             )
-        if current_regime == 'Trending':
-            infer_reasons.append(f"Regime is **Trending** — directional strategies get a score bonus")
+        if current_regime in ('Trending', 'Risk-On'):
+            infer_reasons.append(f"Regime is **{current_regime}** — directional strategies get a score bonus")
 
     # 2. IV rank refines: very high IV → prefer non-directional even in trending regime
     if iv_rank >= 0.75 and inferred_view in ('Bullish', 'Bearish'):
@@ -391,7 +402,10 @@ with col_g2:
         rows = []
         for strat_name, rec in list(strike_recs.items())[:4]:
             rows.append({'Strategy': strat_name, 'Details': str(rec.get('rationale', ''))})
-        st.dataframe(pd.DataFrame(rows), use_container_width=True, hide_index=True)
+        flex_table(pd.DataFrame(rows), columns=[
+            {"key": "Strategy", "label": "Strategy", "width": "28%", "align": "left"},
+            {"key": "Details",  "label": "Details",  "width": "72%", "align": "left"},
+        ], key="ts_strikes")
     else:
         st.info("Strike recommendations not available for current regime settings.")
 
@@ -432,7 +446,7 @@ for name in STRATEGY_PROFILES:
 scored.sort(key=lambda x: x[1], reverse=True)
 top3 = scored[:3]
 
-st.subheader("🏆 Top 3 Suggested Strategies")
+st.subheader("Top 3 Suggested Strategies")
 st.markdown(f"Scored for **{ticker}** | View: **{view}** | Regime: **{current_regime}** | "
             f"IV Rank: **{iv_rank:.0%}** | DTE: **{actual_dte}d**")
 
@@ -442,7 +456,7 @@ st.markdown(f"Scored for **{ticker}** | View: **{view}** | Regime: **{current_re
 for rank, (strat_name, score, reasons) in enumerate(top3, 1):
     rank_colors = {1: '#f59e0b', 2: '#9ca3af', 3: '#cd7f32'}
     rank_color  = rank_colors.get(rank, '#888888')
-    rank_medals = {1: '🥇', 2: '🥈', 3: '🥉'}
+    rank_medals = {1: '#1', 2: '#2', 3: '#3'}
 
     with st.container():
         st.markdown(
@@ -488,15 +502,12 @@ for rank, (strat_name, score, reasons) in enumerate(top3, 1):
             # Legs table
             st.markdown("**Legs:**")
             legs_df = builder.get_legs_dataframe()
-            st.dataframe(
-                legs_df.style.format({
-                    'Strike':  '${:.2f}',
-                    'Premium': '${:.2f}',
-                    'IV':      '{:.2%}',
-                    'Cost':    '${:+,.2f}',
-                }),
-                use_container_width=True, hide_index=True
-            )
+            flex_table(legs_df, columns=[
+                {"key": "Strike",  "label": "Strike",  "width": "25%", "align": "right", "fmt": lambda x: f"${x:.2f}", "numeric": True},
+                {"key": "Premium", "label": "Premium", "width": "25%", "align": "right", "fmt": lambda x: f"${x:.2f}", "numeric": True},
+                {"key": "IV",      "label": "IV",      "width": "25%", "align": "right", "fmt": lambda x: f"{x:.2%}", "numeric": True},
+                {"key": "Cost",    "label": "Cost",    "width": "25%", "align": "right", "fmt": lambda x: f"${x:+,.2f}", "numeric": True, "color_scale": "gr"},
+            ], key="ts_legs")
 
             # Key metrics
             cost   = summary['initial_cost']
@@ -582,16 +593,19 @@ for rank, (strat_name, score, reasons) in enumerate(top3, 1):
 # ─────────────────────────────────────────────────────────────────────────────
 # Full ranking table
 # ─────────────────────────────────────────────────────────────────────────────
-with st.expander("📊 Full Strategy Rankings"):
+with st.expander("Full Strategy Rankings"):
     rank_df = pd.DataFrame([
         {'Rank': i+1, 'Strategy': n, 'Score': s,
          'Bias': STRATEGY_PROFILES[n]['bias'],
          'Premium Type': STRATEGY_PROFILES[n]['premium_type'],
-         'Risk Defined': '✅' if STRATEGY_PROFILES[n]['risk_defined'] else '❌'}
+         'Risk Defined': 'Yes' if STRATEGY_PROFILES[n]['risk_defined'] else 'No'}
         for i, (n, s, _) in enumerate(scored)
     ])
-    st.dataframe(
-        rank_df.style.format({'Score': '{:.1f}'})
-                .background_gradient(subset=['Score'], cmap='RdYlGn'),
-        use_container_width=True, hide_index=True
-    )
+    flex_table(rank_df, columns=[
+        {"key": "Rank",         "label": "Rank",         "width": "8%",  "align": "right", "numeric": True},
+        {"key": "Strategy",     "label": "Strategy",     "width": "28%", "align": "left"},
+        {"key": "Score",        "label": "Score",        "width": "12%", "align": "right", "fmt": lambda x: f"{x:.1f}", "numeric": True, "color_scale": "rg"},
+        {"key": "Bias",         "label": "Bias",         "width": "15%", "align": "left"},
+        {"key": "Premium Type", "label": "Premium",      "width": "20%", "align": "left"},
+        {"key": "Risk Defined", "label": "Risk Def.",    "width": "17%", "align": "center"},
+    ], key="ts_rankings")

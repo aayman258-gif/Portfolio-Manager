@@ -227,11 +227,18 @@ def pnl_color(value: float) -> str:
 def regime_color(regime: str) -> str:
     """Return hex color for a regime name."""
     return {
-        "Low Vol":       "#22c55e",   # green
-        "High Vol":      "#ef4444",   # red
-        "Trending":      "#4a9eff",   # blue
-        "Mean Reversion": "#f59e0b",  # amber
-        "Unknown":       "#6b7a8f",   # muted
+        "Risk-On":         "#22c55e",
+        "Caution":         "#f59e0b",
+        "High Volatility": "#ef4444",
+        "Stagflation":     "#f97316",
+        "Recession":       "#dc2626",
+        "Mean Reversion":  "#4a9eff",
+        "Uncertain":       "#a78bfa",
+        "Unknown":         "#6b7a8f",
+        # legacy
+        "Low Vol":         "#22c55e",
+        "High Vol":        "#ef4444",
+        "Trending":        "#4a9eff",
     }.get(regime, "#6b7a8f")
 
 
@@ -242,7 +249,7 @@ def chart_style_toggle(sidebar_key: str = "chart_style") -> str:
     """
     choice = st.sidebar.radio(
         "Chart Style",
-        options=["📈 Line Chart", "🕯️ Candlestick + Volume"],
+        options=["Line Chart", "Candlestick + Volume"],
         index=0,
         key=sidebar_key,
     )

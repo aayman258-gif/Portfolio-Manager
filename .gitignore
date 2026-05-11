@@ -61,3 +61,12 @@ htmlcov/
 .mypy_cache/
 .dmypy.json
 dmypy.json
+
+# Cache database (local only, auto-regenerated)
+data/cache.db
+
+# MCP server (local dev tooling, not part of app)
+pal-mcp-server/
+
+# Claude config
+.mcp.json

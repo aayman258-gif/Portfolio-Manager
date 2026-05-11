@@ -13,25 +13,26 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
-import yfinance as yf
-
 sys.path.append(str(Path(__file__).parent.parent))
+import data.alpaca_client as alpaca
 
 from utils.carbon_theme import (
     ACCENT, AMBER, BG, BORDER, CARD, DIM, FG, GAIN, LOSS, SUBTLE,
-    apply_carbon_theme, carbon_plotly_layout, page_header,
+    apply_carbon_theme, carbon_plotly_layout, flex_table, page_header, top_nav,
 )
+from utils.portfolio_store import restore_portfolio_to_session
 
 # ── Page config ──────────────────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="Monte Carlo Simulation",
-    page_icon="🎲",
+    page_icon="◈",
     layout="wide",
 )
 apply_carbon_theme()
+top_nav("Monte Carlo")
 page_header(
-    "🎲 Monte Carlo Simulation",
+    "Monte Carlo Simulation",
     "Geometric Brownian Motion · regime-conditioned drift · percentile fan chart",
 )
 
@@ -42,9 +43,7 @@ _TRADING_DAYS = 252
 
 @st.cache_data(ttl=3600, show_spinner=False)
 def _fetch_prices(ticker: str, period: str = "2y") -> pd.Series:
-    raw = yf.download(ticker, period=period, progress=False, auto_adjust=True)
-    if isinstance(raw.columns, pd.MultiIndex):
-        raw.columns = raw.columns.get_level_values(0)
+    raw = alpaca.get_bars(ticker, period=period)
     if raw.empty or "Close" not in raw.columns:
         return pd.Series(dtype=float)
     return raw["Close"].dropna()
@@ -124,11 +123,10 @@ def _risk_metrics(final_prices: np.ndarray, S0: float) -> dict:
     }
 
 
-# ── Sidebar ───────────────────────────────────────────────────────────────────
+# ── Inline settings ───────────────────────────────────────────────────────────
 
-st.sidebar.header("Simulation Settings")
+restore_portfolio_to_session()
 
-# Ticker selection
 _portfolio_tickers: list[str] = []
 if "positions" in st.session_state:
     _df = st.session_state["positions"]
@@ -138,88 +136,55 @@ if "positions" in st.session_state:
             if t and t not in ("NAN", "NONE", "")
         )
 
-if _portfolio_tickers:
-    tickers_selected = st.sidebar.multiselect(
-        "Tickers (from portfolio)",
-        options=_portfolio_tickers,
-        default=_portfolio_tickers[:3],
-        help="Select one or more tickers from your loaded portfolio.",
+_mc_r1c1, _mc_r1c2, _mc_r1c3 = st.columns([3, 2, 1])
+with _mc_r1c1:
+    if _portfolio_tickers:
+        tickers_selected = st.multiselect(
+            "Tickers (from portfolio)",
+            options=_portfolio_tickers, default=_portfolio_tickers[:3],
+        )
+        extra_tickers = st.text_input("Additional tickers (comma-separated)", placeholder="NVDA, META")
+        if extra_tickers:
+            for t in extra_tickers.upper().replace(" ", "").split(","):
+                if t and t not in tickers_selected:
+                    tickers_selected.append(t)
+    else:
+        raw_input = st.text_input("Tickers (comma-separated)", value="AAPL, MSFT, NVDA")
+        tickers_selected = [t.strip().upper() for t in raw_input.split(",") if t.strip()]
+
+with _mc_r1c2:
+    n_sims = st.select_slider(
+        "Simulations", options=[100, 500, 1_000, 5_000, 10_000], value=1_000,
     )
-    extra_tickers = st.sidebar.text_input(
-        "Additional tickers (comma-separated)",
-        placeholder="e.g. NVDA, META",
+    horizon_days = st.select_slider(
+        "Horizon", options=[21, 42, 63, 126, 252, 504], value=252,
+        format_func=lambda d: {21:"1mo",42:"2mo",63:"3mo",126:"6mo",252:"1yr",504:"2yr"}[d],
     )
-    if extra_tickers:
-        for t in extra_tickers.upper().replace(" ", "").split(","):
-            if t and t not in tickers_selected:
-                tickers_selected.append(t)
-else:
-    raw_input = st.sidebar.text_input(
-        "Tickers (comma-separated)",
-        value="AAPL, MSFT, NVDA",
-        help="No portfolio loaded — enter tickers manually.",
-    )
-    tickers_selected = [
-        t.strip().upper() for t in raw_input.split(",") if t.strip()
-    ]
 
-st.sidebar.divider()
+with _mc_r1c3:
+    lookback = st.selectbox("Lookback", options=["6mo", "1y", "2y", "5y"], index=2)
+    show_paths = st.number_input("Sample paths", min_value=10, max_value=2500, value=100, step=10)
+    use_current_regime = st.checkbox("Regime drift adjust", value=True)
 
-n_sims = st.sidebar.select_slider(
-    "Simulations",
-    options=[100, 500, 1_000, 5_000, 10_000],
-    value=1_000,
-    help="More simulations = smoother distribution but slower to compute.",
-)
-
-horizon_days = st.sidebar.select_slider(
-    "Horizon (trading days)",
-    options=[21, 42, 63, 126, 252, 504],
-    value=252,
-    format_func=lambda d: {21:"1 month",42:"2 months",63:"3 months",
-                            126:"6 months",252:"1 year",504:"2 years"}[d],
-)
-
-lookback = st.sidebar.selectbox(
-    "Parameter lookback",
-    options=["6mo", "1y", "2y", "5y"],
-    index=2,
-    help="Historical window used to estimate drift (μ) and volatility (σ).",
-)
-
-show_paths = st.sidebar.number_input(
-    "Sample paths to plot",
-    min_value=10, max_value=2500, value=100, step=10,
-    help="Number of individual simulated paths drawn on the fan chart.",
-)
-
-use_current_regime = st.sidebar.checkbox(
-    "Apply regime drift adjustment",
-    value=True,
-    help=(
-        "When enabled, drift is nudged toward the regime-implied equity premium:\n"
-        "Low Vol → full CAPM drift · High Vol → risk-free rate only · "
-        "Trending → CAPM + 1.5× premium · Mean Reversion → CAPM · "
-        "Uncertain → average of CAPM and risk-free."
-    ),
-)
-
-st.sidebar.divider()
-st.sidebar.caption(
-    f"Model: Geometric Brownian Motion  \n"
-    f"dS = μS dt + σS dW  \n"
-    f"Params estimated from {lookback} of daily log-returns."
+st.caption(
+    f"Model: GBM · dS = μS dt + σS dW · Parameters from {lookback} of daily log-returns."
 )
 
 # ── Regime drift multiplier ───────────────────────────────────────────────────
 
 _REGIME_MU_BLEND: dict[str, float] = {
     # blend weight toward CAPM mu (vs. risk-free floor)
-    "Low Vol":        1.00,
-    "High Vol":       0.00,   # use risk-free only
-    "Trending":       1.20,   # slight momentum boost (capped later)
-    "Mean Reversion": 1.00,
-    "Uncertain":      0.50,
+    "Risk-On":         1.20,   # momentum boost
+    "Caution":         0.70,
+    "High Volatility": 0.10,   # near risk-free only
+    "Stagflation":     0.60,
+    "Recession":       0.00,   # use risk-free only
+    "Mean Reversion":  1.00,
+    "Uncertain":       0.50,
+    # legacy
+    "Low Vol":         1.00,
+    "High Vol":        0.00,
+    "Trending":        1.20,
 }
 _RF = 0.04   # annualised risk-free rate
 
@@ -313,8 +278,11 @@ if not results:
 
 # Regime banner
 _regime_colors = {
+    "Risk-On": GAIN, "Caution": AMBER, "High Volatility": LOSS,
+    "Stagflation": "#f97316", "Recession": "#dc2626",
+    "Mean Reversion": ACCENT, "Uncertain": SUBTLE, "Unknown": DIM,
+    # legacy
     "Low Vol": GAIN, "High Vol": LOSS, "Trending": ACCENT,
-    "Mean Reversion": AMBER, "Uncertain": SUBTLE, "Unknown": DIM,
 }
 _rc = _regime_colors.get(current_regime, DIM)
 st.markdown(
@@ -346,7 +314,7 @@ prices = res["prices"]
 
 # ── Section 1: Fan chart ──────────────────────────────────────────────────────
 
-st.subheader(f"📈 Simulated Price Paths — {selected_ticker}")
+st.subheader(f"Simulated Price Paths — {selected_ticker}")
 
 x_axis = list(range(horizon_days + 1))
 
@@ -421,7 +389,7 @@ st.plotly_chart(fig_paths, use_container_width=True)
 
 # ── Section 2: 3D Distribution Surface ───────────────────────────────────────
 
-st.subheader(f"🏔️ 3D Price Distribution Surface — {selected_ticker}")
+st.subheader(f"3D Price Distribution Surface — {selected_ticker}")
 
 _N_TIME = 60    # time snapshots along the horizon
 _N_BINS = 80    # price bins for density estimation
@@ -573,7 +541,7 @@ st.caption(
 
 # ── Section 3: Key metrics ────────────────────────────────────────────────────
 
-st.subheader("📊 Outcome Metrics")
+st.subheader("Outcome Metrics")
 
 _horizon_label = {
     21:"1 month", 42:"2 months", 63:"3 months",
@@ -608,7 +576,7 @@ with c8:
 
 # ── Section 4: Distribution + percentile table ────────────────────────────────
 
-st.subheader("📉 Final Price Distribution")
+st.subheader("Final Price Distribution")
 
 col_hist, col_tbl = st.columns([3, 2])
 
@@ -697,7 +665,7 @@ with col_tbl:
 
 # ── Section 5: VaR / CVaR bar chart ──────────────────────────────────────────
 
-st.subheader("🛡️ Risk Summary")
+st.subheader("Risk Summary")
 
 col_risk1, col_risk2 = st.columns(2)
 
@@ -789,24 +757,34 @@ with col_risk2:
 # ── Section 5: Multi-ticker comparison ───────────────────────────────────────
 
 if len(results) > 1:
-    st.subheader("🔀 Multi-Ticker Comparison")
+    st.subheader("Multi-Ticker Comparison")
 
     summary_rows = []
     for tkr, r in results.items():
         rm = r["risk"]
         summary_rows.append({
-            "Ticker":         tkr,
-            "Current ($)":    f"${r['S0']:.2f}",
-            "Median ($)":     f"${rm['p50_price']:.2f}",
-            "Median Return":  f"{rm['median_return']*100:+.1f}%",
-            "P(Gain)":        f"{rm['prob_gain']*100:.1f}%",
-            "VaR 95%":        f"{rm['var_95']*100:.2f}%",
-            "CVaR 95%":       f"{rm['cvar_95']*100:.2f}%",
-            "σ (annual)":     f"{r['sigma']*100:.1f}%",
-            "μ (annual)":     f"{r['mu']*100:.1f}%",
+            "Ticker":        tkr,
+            "Current ($)":   r["S0"],
+            "Median ($)":    rm["p50_price"],
+            "Median Return": rm["median_return"] * 100,
+            "P(Gain)":       rm["prob_gain"] * 100,
+            "VaR 95%":       rm["var_95"] * 100,
+            "CVaR 95%":      rm["cvar_95"] * 100,
+            "σ (annual)":    r["sigma"] * 100,
+            "μ (annual)":    r["mu"] * 100,
         })
     summary_df = pd.DataFrame(summary_rows)
-    st.dataframe(summary_df, use_container_width=True, hide_index=True)
+    flex_table(summary_df, columns=[
+        {"key": "Ticker",        "label": "Ticker",       "width": "9%",  "align": "left"},
+        {"key": "Current ($)",   "label": "Current",      "width": "11%", "align": "right", "fmt": lambda x: f"${x:.2f}", "numeric": True},
+        {"key": "Median ($)",    "label": "Median",       "width": "11%", "align": "right", "fmt": lambda x: f"${x:.2f}", "numeric": True},
+        {"key": "Median Return", "label": "Med. Return",  "width": "12%", "align": "right", "fmt": lambda x: f"{x:+.1f}%", "numeric": True, "color_scale": "rg"},
+        {"key": "P(Gain)",       "label": "P(Gain)",      "width": "10%", "align": "right", "fmt": lambda x: f"{x:.1f}%", "numeric": True, "color_scale": "rg"},
+        {"key": "VaR 95%",       "label": "VaR 95%",      "width": "11%", "align": "right", "fmt": lambda x: f"{x:.2f}%", "numeric": True},
+        {"key": "CVaR 95%",      "label": "CVaR 95%",     "width": "11%", "align": "right", "fmt": lambda x: f"{x:.2f}%", "numeric": True},
+        {"key": "σ (annual)",    "label": "σ Ann.",       "width": "12%", "align": "right", "fmt": lambda x: f"{x:.1f}%", "numeric": True},
+        {"key": "μ (annual)",    "label": "μ Ann.",       "width": "13%", "align": "right", "fmt": lambda x: f"{x:.1f}%", "numeric": True, "color_scale": "rg"},
+    ], key="mc_summary")
 
     # Overlay median paths
     fig_multi = go.Figure()
@@ -846,7 +824,7 @@ if len(results) > 1:
 
 # ── Methodology note ─────────────────────────────────────────────────────────
 
-with st.expander("📚 Methodology"):
+with st.expander("Methodology"):
     st.markdown(f"""
 **Model: Geometric Brownian Motion (GBM)**
 

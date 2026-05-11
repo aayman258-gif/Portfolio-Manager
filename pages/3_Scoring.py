@@ -14,27 +14,32 @@ from datetime import datetime, timedelta
 # Add parent directory to path
 sys.path.append(str(Path(__file__).parent.parent))
 
-from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, ACCENT, page_header
+from utils.carbon_theme import apply_carbon_theme, carbon_plotly_layout, flex_table, ACCENT, page_header, top_nav
 
 from calculations.scoring_engine import ScoringEngine
 from calculations.regime_detector import RegimeDetector
 from data.portfolio_loader import PortfolioLoader
 from data.market_data import MarketDataLoader
+from utils.portfolio_store import restore_portfolio_to_session
 
 
 # Page config
 st.set_page_config(
     page_title="Position Scoring",
-    page_icon="⭐",
+    page_icon="◈",
     layout="wide"
 )
 apply_carbon_theme()
+top_nav("Scoring")
 
-page_header("⭐ Position Scoring Engine", "Score each position on quant signals and fundamental metrics")
+page_header("Position Scoring Engine", "Score each position on quant signals and fundamental metrics")
+
+# Auto-restore portfolio from disk if not in session
+restore_portfolio_to_session()
 
 # Check if portfolio exists
 if 'positions' not in st.session_state:
-    st.warning("⚠️ No portfolio loaded. Please go to Home page and load a portfolio first.")
+    st.warning("No portfolio loaded. Please go to Home page and load a portfolio first.")
     st.stop()
 
 positions_df = st.session_state['positions']
@@ -57,7 +62,7 @@ def get_current_regime():
 
 current_regime = get_current_regime()
 
-st.subheader(f"📊 Current Market Regime: {current_regime}")
+st.subheader(f"Current Market Regime: {current_regime}")
 
 # Display regime weighting
 regime_weights = scorer.regime_weights.get(current_regime, {'quant': 0.5, 'fundamental': 0.5})
@@ -71,39 +76,40 @@ with col2:
 st.info(f"**{current_regime} Regime:** Weighting quant signals at {regime_weights['quant']*100:.0f}% and fundamentals at {regime_weights['fundamental']*100:.0f}%")
 
 # ── Customizable Weight Sliders ──────────────────────────────────────────────
-st.sidebar.divider()
-st.sidebar.header("⚙️ Custom Score Weights")
-use_custom_weights = st.sidebar.checkbox("Override regime weights", value=False)
+with st.expander("Custom Score Weights", expanded=False):
+    use_custom_weights = st.checkbox("Override regime weights", value=False, key="scoring_custom_weights")
 
-if use_custom_weights:
-    custom_quant_w = st.sidebar.slider("Quant Weight", 0.0, 1.0,
-                                        float(regime_weights['quant']), 0.05)
-    custom_fund_w = round(1.0 - custom_quant_w, 2)
-    st.sidebar.metric("Fundamental Weight", f"{custom_fund_w*100:.0f}%")
-
-    st.sidebar.markdown("**Quant Components:**")
-    momentum_w   = st.sidebar.slider("Momentum",    0.0, 1.0, 0.40, 0.05)
-    volatility_w = st.sidebar.slider("Volatility",  0.0, 1.0, 0.30, 0.05)
-    regime_fit_w = max(0.0, round(1.0 - momentum_w - volatility_w, 2))
-    st.sidebar.metric("Regime Fit Weight", f"{regime_fit_w*100:.0f}%")
-
-    st.sidebar.markdown("**Fundamental Components:**")
-    growth_w    = st.sidebar.slider("Growth",    0.0, 1.0, 0.35, 0.05)
-    quality_w   = st.sidebar.slider("Quality",   0.0, 1.0, 0.35, 0.05)
-    valuation_w = max(0.0, round(1.0 - growth_w - quality_w, 2))
-    st.sidebar.metric("Valuation Weight", f"{valuation_w*100:.0f}%")
-else:
-    custom_quant_w   = regime_weights['quant']
-    custom_fund_w    = regime_weights['fundamental']
-    momentum_w       = 0.40
-    volatility_w     = 0.30
-    regime_fit_w     = 0.30
-    growth_w         = 0.35
-    quality_w        = 0.35
-    valuation_w      = 0.30
+    if use_custom_weights:
+        _sw1, _sw2, _sw3 = st.columns(3)
+        with _sw1:
+            st.markdown("**Composite Weights**")
+            custom_quant_w = st.slider("Quant Weight", 0.0, 1.0, float(regime_weights['quant']), 0.05, key="sc_quant_w")
+            custom_fund_w  = round(1.0 - custom_quant_w, 2)
+            st.metric("Fundamental Weight", f"{custom_fund_w*100:.0f}%")
+        with _sw2:
+            st.markdown("**Quant Components**")
+            momentum_w   = st.slider("Momentum",   0.0, 1.0, 0.40, 0.05, key="sc_mom_w")
+            volatility_w = st.slider("Volatility", 0.0, 1.0, 0.30, 0.05, key="sc_vol_w")
+            regime_fit_w = max(0.0, round(1.0 - momentum_w - volatility_w, 2))
+            st.metric("Regime Fit Weight", f"{regime_fit_w*100:.0f}%")
+        with _sw3:
+            st.markdown("**Fundamental Components**")
+            growth_w    = st.slider("Growth",    0.0, 1.0, 0.35, 0.05, key="sc_growth_w")
+            quality_w   = st.slider("Quality",   0.0, 1.0, 0.35, 0.05, key="sc_quality_w")
+            valuation_w = max(0.0, round(1.0 - growth_w - quality_w, 2))
+            st.metric("Valuation Weight", f"{valuation_w*100:.0f}%")
+    else:
+        custom_quant_w   = regime_weights['quant']
+        custom_fund_w    = regime_weights['fundamental']
+        momentum_w       = 0.40
+        volatility_w     = 0.30
+        regime_fit_w     = 0.30
+        growth_w         = 0.35
+        quality_w        = 0.35
+        valuation_w      = 0.30
 
 # Score all positions
-st.subheader("📋 Position Scores")
+st.subheader("Position Scores")
 
 with st.spinner("Scoring all positions... This may take a moment."):
 
@@ -184,22 +190,23 @@ if scores_data:
         else:
             return 'background-color: rgba(251,113,133,0.25); color: #ffffff'
 
-    styled_df = display_df.style.format({
-        'Unified Score': '{:.1f}',
-        'Quant Score': '{:.1f}',
-        'Fundamental Score': '{:.1f}',
-        'Momentum': '{:.1f}',
-        'Volatility': '{:.1f}',
-        'Regime Fit': '{:.1f}',
-        'Growth': '{:.1f}',
-        'Quality': '{:.1f}',
-        'Valuation': '{:.1f}'
-    }).applymap(color_score, subset=['Unified Score'])
-
-    st.dataframe(styled_df, use_container_width=True, hide_index=True)
+    _fmt1 = lambda x: f"{x:.1f}"
+    flex_table(display_df, columns=[
+        {"key": "Ticker",           "label": "Ticker",  "width": "9%",  "align": "left"},
+        {"key": "Unified Score",    "label": "Score",   "width": "10%", "align": "right", "fmt": _fmt1, "numeric": True, "color_scale": "rg"},
+        {"key": "Rating",           "label": "Rating",  "width": "11%", "align": "left"},
+        {"key": "Quant Score",      "label": "Quant",   "width": "9%",  "align": "right", "fmt": _fmt1, "numeric": True},
+        {"key": "Fundamental Score","label": "Fund.",   "width": "9%",  "align": "right", "fmt": _fmt1, "numeric": True},
+        {"key": "Momentum",         "label": "Mom.",    "width": "9%",  "align": "right", "fmt": _fmt1, "numeric": True},
+        {"key": "Volatility",       "label": "Vol.",    "width": "9%",  "align": "right", "fmt": _fmt1, "numeric": True},
+        {"key": "Regime Fit",       "label": "Regime",  "width": "9%",  "align": "right", "fmt": _fmt1, "numeric": True},
+        {"key": "Growth",           "label": "Growth",  "width": "9%",  "align": "right", "fmt": _fmt1, "numeric": True},
+        {"key": "Quality",          "label": "Quality", "width": "8%",  "align": "right", "fmt": _fmt1, "numeric": True},
+        {"key": "Valuation",        "label": "Value",   "width": "8%",  "align": "right", "fmt": _fmt1, "numeric": True},
+    ], key="scoring_main")
 
     # Score visualization
-    st.subheader("📊 Score Comparison")
+    st.subheader("Score Comparison")
 
     col1, col2 = st.columns(2)
 
@@ -258,7 +265,7 @@ if scores_data:
         st.plotly_chart(fig_scatter, use_container_width=True)
 
     # Detailed breakdown for each position
-    st.subheader("🔍 Detailed Position Analysis")
+    st.subheader("Detailed Position Analysis")
 
     selected_ticker = st.selectbox(
         "Select position to analyze:",
@@ -320,7 +327,7 @@ if scores_data:
     st.plotly_chart(fig_radar, use_container_width=True)
 
     # Fundamental details
-    st.markdown("### 📊 Fundamental Metrics")
+    st.markdown("### Fundamental Metrics")
 
     fundamentals = full_data['fundamentals']
 
@@ -358,7 +365,7 @@ if scores_data:
     # Fundamental Trends
     trends = full_data.get('fundamental_trends', {})
     if trends:
-        st.markdown("### 📈 Fundamental Trends")
+        st.markdown("### Fundamental Trends")
         _icons  = {'up': '↑', 'down': '↓', 'flat': '→'}
         _colors = {'up': '#22d3ee', 'down': '#fb7185', 'flat': '#888888'}
         trend_cols = st.columns(max(len(trends), 1))
@@ -376,7 +383,7 @@ if scores_data:
                 )
 
     # Action recommendation
-    st.markdown("### 💡 Recommendation")
+    st.markdown("### Recommendation")
 
     if full_data['unified_score'] >= 80:
         st.success(f"""
@@ -410,7 +417,7 @@ if scores_data:
         """)
 
     # Export
-    st.subheader("💾 Export Scores")
+    st.subheader("Export Scores")
 
     export_df = display_df.copy()
     csv = export_df.to_csv(index=False)
@@ -426,7 +433,7 @@ else:
     st.error("No position scores calculated. Please check your portfolio data.")
 
 # Educational content
-with st.expander("📚 How the Scoring System Works"):
+with st.expander("How the Scoring System Works"):
     st.markdown("""
     ## Unified Scoring Methodology
 

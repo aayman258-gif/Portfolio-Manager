@@ -15,10 +15,18 @@ class ScoringEngine:
 
     def __init__(self):
         self.regime_weights = {
-            'Low Vol': {'quant': 0.3, 'fundamental': 0.7},      # Value regime
-            'High Vol': {'quant': 0.4, 'fundamental': 0.6},     # Quality focus
-            'Trending': {'quant': 0.7, 'fundamental': 0.3},     # Momentum regime
-            'Mean Reversion': {'quant': 0.5, 'fundamental': 0.5}  # Balanced
+            # New 6-signal regimes
+            'Risk-On':         {'quant': 0.65, 'fundamental': 0.35},  # Momentum / growth tilt
+            'Caution':         {'quant': 0.45, 'fundamental': 0.55},  # Quality tilt
+            'High Volatility': {'quant': 0.35, 'fundamental': 0.65},  # Defensives / quality
+            'Stagflation':     {'quant': 0.40, 'fundamental': 0.60},  # Real assets / value
+            'Recession':       {'quant': 0.30, 'fundamental': 0.70},  # Deep quality / defensives
+            'Mean Reversion':  {'quant': 0.50, 'fundamental': 0.50},  # Balanced
+            'Uncertain':       {'quant': 0.45, 'fundamental': 0.55},  # Conservative
+            # Legacy fallbacks
+            'Low Vol':         {'quant': 0.30, 'fundamental': 0.70},
+            'High Vol':        {'quant': 0.40, 'fundamental': 0.60},
+            'Trending':        {'quant': 0.70, 'fundamental': 0.30},
         }
 
     def calculate_momentum_score(self, prices: pd.Series, lookback: int = 60) -> float:
@@ -82,27 +90,27 @@ class ScoringEngine:
 
         score = 50.0  # Default neutral
 
-        if current_regime == 'Low Vol':
-            # Favor low volatility, stable stocks
-            score = 100 - (volatility / 40 * 100)  # Lower vol = higher score
-            score = np.clip(score, 0, 100)
-
-        elif current_regime == 'High Vol':
-            # Favor defensive, stable stocks in high vol
-            score = 100 - (volatility / 40 * 100)
-            score = np.clip(score, 0, 100)
-
-        elif current_regime == 'Trending':
+        if current_regime in ('Risk-On', 'Trending'):
             # Favor momentum and trend alignment
             if trend_strength > 0:
                 score = 50 + np.clip(trend_strength * 2, 0, 50)
             else:
                 score = 50 + np.clip(trend_strength * 2, -50, 0)
 
+        elif current_regime in ('High Volatility', 'Recession', 'High Vol'):
+            # Favor defensive, stable (low vol) stocks
+            score = 100 - (volatility / 40 * 100)
+            score = np.clip(score, 0, 100)
+
+        elif current_regime in ('Low Vol', 'Caution', 'Stagflation'):
+            # Favor lower-vol, quality stocks
+            score = 100 - (volatility / 40 * 100)
+            score = np.clip(score, 0, 100)
+
         elif current_regime == 'Mean Reversion':
             # Favor oversold quality (negative momentum but low vol)
             if trend_strength < 0:
-                score = 60 - (volatility / 60 * 40)  # Oversold + low vol = high score
+                score = 60 - (volatility / 60 * 40)
             else:
                 score = 40
 
