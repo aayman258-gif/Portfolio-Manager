@@ -112,6 +112,33 @@ def build_occ_symbol(underlying: str, expiration: str, option_type: str, strike:
     return f"{underlying.upper()}{date_s}{cp}{strike_i:08d}"
 
 
+# ── Open Interest supplement (yfinance) ───────────────────────────────────────
+
+def _fetch_yf_oi(underlying: str, expiration: str | None) -> dict[tuple[float, str], int]:
+    """
+    Return a dict keyed by (strike, 'call'|'put') → open_interest.
+    Uses yfinance which reliably exposes OPRA open interest.
+    Returns empty dict on any error.
+    """
+    try:
+        import yfinance as yf
+        ticker = yf.Ticker(underlying)
+        exps   = list(ticker.options)
+        if not exps:
+            return {}
+        exp = expiration if expiration in exps else exps[0]
+        chain  = ticker.option_chain(exp)
+        oi_map: dict[tuple[float, str], int] = {}
+        for row in chain.calls.itertuples():
+            oi_map[(float(row.strike), "call")] = int(getattr(row, "openInterest", 0) or 0)
+        for row in chain.puts.itertuples():
+            oi_map[(float(row.strike), "put")]  = int(getattr(row, "openInterest", 0) or 0)
+        return oi_map
+    except Exception as exc:
+        print(f"[alpaca_options] OI supplement error ({underlying}): {exc}")
+        return {}
+
+
 # ── Core data functions ────────────────────────────────────────────────────────
 
 def get_option_chain(
@@ -125,7 +152,9 @@ def get_option_chain(
     DataFrames match the yfinance option_chain() column schema, plus
     native greeks columns: delta, gamma, theta, vega.
 
-    Falls back to yfinance on any Alpaca error.
+    Quotes + greeks come from Alpaca (real-time).
+    Open interest is supplemented from yfinance (OPRA), merged by strike.
+    Falls back to yfinance entirely on any Alpaca error.
     """
     try:
         from alpaca.data.requests import OptionChainRequest
@@ -133,12 +162,14 @@ def get_option_chain(
         client = _get_client()
         req_kwargs: dict = {"underlying_symbol": underlying.upper()}
         if expiration:
-            from datetime import date as _date
             req_kwargs["expiration_date"] = datetime.strptime(expiration, "%Y-%m-%d").date()
 
         raw = client.get_option_chain(OptionChainRequest(**req_kwargs))
         if not raw:
             raise ValueError("Empty chain returned")
+
+        # Fetch OI from yfinance in parallel with chain parsing
+        oi_map = _fetch_yf_oi(underlying, expiration)
 
         rows = []
         for symbol, snap in raw.items():
@@ -146,15 +177,21 @@ def get_option_chain(
             if not parsed:
                 continue
 
-            quote = snap.latest_quote
-            trade = snap.latest_trade
+            quote  = snap.latest_quote
+            trade  = snap.latest_trade
             greeks = snap.greeks
 
-            bid   = float(quote.bid_price)  if quote and quote.bid_price  else 0.0
-            ask   = float(quote.ask_price)  if quote and quote.ask_price  else 0.0
-            last  = float(trade.price)      if trade and trade.price      else (bid + ask) / 2
-            iv    = float(snap.implied_volatility) if snap.implied_volatility else 0.0
-            vol   = int(quote.bid_size + quote.ask_size) if quote else 0
+            bid  = float(quote.bid_price) if quote and quote.bid_price else 0.0
+            ask  = float(quote.ask_price) if quote and quote.ask_price else 0.0
+            last = float(trade.price)     if trade and trade.price     else (bid + ask) / 2
+            iv   = float(snap.implied_volatility) if snap.implied_volatility else 0.0
+            vol  = int(quote.bid_size + quote.ask_size) if quote else 0
+
+            # OI: try SDK attribute first (future-proof), then yfinance map
+            oi = getattr(snap, "open_interest", None)
+            if oi is None:
+                oi = oi_map.get((parsed["strike"], parsed["option_type"]), 0)
+            oi = int(oi) if oi else 0
 
             rows.append({
                 "contractSymbol":    symbol,
@@ -164,11 +201,10 @@ def get_option_chain(
                 "ask":               ask,
                 "midPrice":          (bid + ask) / 2,
                 "volume":            vol,
-                "openInterest":      0,
+                "openInterest":      oi,
                 "impliedVolatility": iv,
                 "expiration":        parsed["expiration"],
                 "option_type":       parsed["option_type"],
-                # greeks (None if snap.greeks is None)
                 "delta": float(greeks.delta) if greeks else None,
                 "gamma": float(greeks.gamma) if greeks else None,
                 "theta": float(greeks.theta) if greeks else None,
@@ -179,7 +215,6 @@ def get_option_chain(
         if df.empty:
             raise ValueError("No rows after parsing")
 
-        # Current underlying price via stock client
         from data.alpaca_client import get_latest_price
         underlying_price = get_latest_price(underlying) or 0.0
 
@@ -251,22 +286,29 @@ def get_option_snapshot(
         last = float(trade.price)     if trade and trade.price     else (bid + ask) / 2
         iv   = float(snap.implied_volatility) if snap.implied_volatility else 0.0
 
+        # OI: try SDK attribute first, then yfinance supplement
+        oi = getattr(snap, "open_interest", None)
+        if oi is None:
+            oi_map = _fetch_yf_oi(underlying, expiration)
+            oi = oi_map.get((float(strike), option_type.lower()), 0)
+        oi = int(oi) if oi else 0
+
         return {
-            "symbol":      symbol,
-            "underlying":  underlying,
-            "expiration":  expiration,
-            "option_type": option_type,
-            "strike":      strike,
-            "bid":         bid,
-            "ask":         ask,
-            "mid":         (bid + ask) / 2,
-            "last":        last,
-            "iv":          iv,
-            "delta":       float(greeks.delta) if greeks else None,
-            "gamma":       float(greeks.gamma) if greeks else None,
-            "theta":       float(greeks.theta) if greeks else None,
-            "vega":        float(greeks.vega)  if greeks else None,
-            "open_interest": 0,
+            "symbol":        symbol,
+            "underlying":    underlying,
+            "expiration":    expiration,
+            "option_type":   option_type,
+            "strike":        strike,
+            "bid":           bid,
+            "ask":           ask,
+            "mid":           (bid + ask) / 2,
+            "last":          last,
+            "iv":            iv,
+            "delta":         float(greeks.delta) if greeks else None,
+            "gamma":         float(greeks.gamma) if greeks else None,
+            "theta":         float(greeks.theta) if greeks else None,
+            "vega":          float(greeks.vega)  if greeks else None,
+            "open_interest": oi,
         }
 
     except Exception as exc:
