@@ -1469,6 +1469,31 @@ with tab_f:
                 return pd.DataFrame(), {}
             exp_list = expirations if n_exps == "All" else expirations[:int(n_exps)]
             now = datetime.now()
+
+            # ── Pre-fetch OI from yfinance for all needed expirations ─────────
+            # yfinance is the only reliable source of open interest (OPRA data).
+            # We build a master dict keyed (exp, strike, 'call'|'put') → OI.
+            # Expirations yfinance doesn't carry (some weeklies) are tracked in
+            # yf_exp_missing so we can skip them rather than falsely flagging OI=0.
+            oi_master: dict[tuple[str, float, str], int] = {}
+            yf_exp_missing: set[str] = set()
+            try:
+                yf_available = set(yf.Ticker(ticker).options)
+                for exp in exp_list:
+                    if exp not in yf_available:
+                        yf_exp_missing.add(exp)
+                        continue
+                    try:
+                        chain = yf.Ticker(ticker).option_chain(exp)
+                        for row in chain.calls.itertuples():
+                            oi_master[(exp, float(row.strike), 'call')] = int(getattr(row, 'openInterest', 0) or 0)
+                        for row in chain.puts.itertuples():
+                            oi_master[(exp, float(row.strike), 'put')] = int(getattr(row, 'openInterest', 0) or 0)
+                    except Exception:
+                        yf_exp_missing.add(exp)
+            except Exception:
+                pass  # If yfinance fails entirely, all exps treated as missing
+
             all_rows = []
             for exp in exp_list:
                 try:
@@ -1476,21 +1501,40 @@ with tab_f:
                 except ValueError:
                     continue
                 calls, puts, underlying = loader.get_options_chain(ticker, exp)
+                exp_has_oi_data = exp not in yf_exp_missing
+
                 for df_opt, otype in [(calls, 'Call'), (puts, 'Put')]:
                     if df_opt.empty:
                         continue
                     for _, row in df_opt.iterrows():
-                        vol  = _safe_float(row.get('volume'), 0.0)
-                        oi   = _safe_float(row.get('openInterest'), 0.0)
-                        last = _safe_float(row.get('lastPrice'), 0.0)
-                        bid  = _safe_float(row.get('bid'), 0.0)
-                        ask  = _safe_float(row.get('ask'), 0.0)
-                        iv   = _safe_float(row.get('impliedVolatility'), 0.0)
+                        vol    = _safe_float(row.get('volume'), 0.0)
                         strike = _safe_float(row.get('strike'), 0.0)
+                        last   = _safe_float(row.get('lastPrice'), 0.0)
+                        bid    = _safe_float(row.get('bid'), 0.0)
+                        ask    = _safe_float(row.get('ask'), 0.0)
+                        iv     = _safe_float(row.get('impliedVolatility'), 0.0)
+
                         if vol < min_volume:
                             continue
+
+                        # OI: use pre-fetched yfinance master map (most reliable)
+                        oi_key = (exp, float(strike), otype.lower())
+                        if exp_has_oi_data:
+                            oi = oi_master.get(oi_key, 0)
+                        else:
+                            # yfinance has no data for this expiration — skip so we
+                            # don't falsely mark every contract as unusual
+                            continue
+
                         vol_oi_ratio = vol / oi if oi > 0 else np.nan
-                        unusual = (vol_oi_ratio >= vol_oi_thresh) if not np.isnan(vol_oi_ratio) else True
+                        # Only flag as unusual if vol/OI ratio exceeds threshold OR OI is
+                        # genuinely zero (brand-new position on a known expiration)
+                        if not np.isnan(vol_oi_ratio):
+                            unusual = vol_oi_ratio >= vol_oi_thresh
+                        else:
+                            # OI = 0 on a date yfinance knows about → new position
+                            unusual = True
+
                         mid  = (bid + ask) / 2 if bid > 0 and ask > 0 else last
                         side = 'Bought' if last >= mid - 0.01 else 'Sold'
                         dollar_prem = vol * last * 100
@@ -1498,11 +1542,12 @@ with tab_f:
                             'Type': otype, 'Strike': strike, 'Expiry': exp, 'DTE': dte,
                             'Last': last, 'Bid': bid, 'Ask': ask, 'IV (%)': round(iv * 100, 1),
                             'Volume': int(vol) if np.isfinite(vol) else 0,
-                            'OI': int(oi) if np.isfinite(oi) else 0,
+                            'OI': int(oi),
                             'Vol/OI': round(vol_oi_ratio, 2) if not np.isnan(vol_oi_ratio) else None,
                             'Side': side, 'Dollar Premium': dollar_prem,
                             'Unusual': unusual, 'Underlying': underlying,
                         })
+
             if not all_rows:
                 return pd.DataFrame(), {}
             df = pd.DataFrame(all_rows)
