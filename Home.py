@@ -29,10 +29,16 @@ from utils.carbon_theme import (
     apply_carbon_theme, carbon_plotly_layout, top_nav, metric_card, flex_table,
     GAIN, LOSS, ACCENT, BG, CARD, CARD2, BORDER, BORDER2, FG, DIM, SUBTLE, AMBER, GREEN, PURPLE,
     regime_color, page_header, section_header, _SANS, _SERIF,
+    regime_alert_banner, position_alert_banners, macro_event_banner,
 )
 from utils.portfolio_store import (
     save_portfolio, load_portfolio, portfolio_file_exists, get_last_saved_time,
     save_options_positions, load_options_positions,
+)
+from data.trade_journal import (
+    log_trade, get_trades, delete_trade,
+    save_daily_snapshot, get_portfolio_history,
+    compute_equity_curve, compute_trade_pnl,
 )
 
 # ── Multi-leg strategy templates ──────────────────────────────────────────────
@@ -444,8 +450,8 @@ if 'positions' in st.session_state:
 # ══════════════════════════════════════════════════════════════════════════════
 page_header("Command Center", datetime.now().strftime('%A, %B %-d, %Y'))
 
-tab_overview, tab_positions, tab_options, tab_signals = st.tabs([
-    "Overview", "Positions", "Options", "Trade Signals"
+tab_overview, tab_positions, tab_options, tab_signals, tab_journal = st.tabs([
+    "Overview", "Positions", "Options", "Trade Signals", "Trade Journal"
 ])
 
 # ── Shared data (loaded once, used across tabs) ───────────────────────────────
@@ -499,6 +505,20 @@ with tab_overview:
             current_regime, regime_info, market_stats = "Unknown", {}, {}
 
         rc = regime_color(current_regime)
+
+        # ── Alert banners ─────────────────────────────────────────────────────
+        regime_alert_banner(current_regime)
+        if current_prices:
+            position_alert_banners(positions_df, current_prices)
+        # Macro events from calendar_data if available
+        try:
+            from data.calendar_data import get_upcoming_events as _get_evts
+            _raw_evts = _get_evts(days_ahead=7)
+            _evts = [{"name": e["label"], "days_away": e["days"]} for e in _raw_evts]
+            if _evts:
+                macro_event_banner(_evts)
+        except Exception:
+            pass
 
         # ── Top KPI row ───────────────────────────────────────────────────────
         k1, k2, k3, k4, k5 = st.columns(5)
@@ -1675,3 +1695,229 @@ with tab_signals:
             ],
             key="rankings",
         )
+
+# ══════════════════════════════════════════════════════════════════════════════
+# TAB 5 — TRADE JOURNAL
+# ══════════════════════════════════════════════════════════════════════════════
+with tab_journal:
+    section_header("Trade Journal & Portfolio History")
+
+    # ── Auto-snapshot today's portfolio value ─────────────────────────────────
+    if positions_df is not None and not positions_df.empty and current_prices:
+        try:
+            _snap_val = sum(
+                float(row.get("shares", 0)) * current_prices.get(row.get("ticker", ""), 0)
+                for _, row in positions_df.iterrows()
+            )
+            _snap_spy = current_prices.get("SPY", 0)
+            if _snap_spy == 0:
+                try:
+                    import yfinance as _yf2
+                    _snap_spy = float(_yf2.Ticker("SPY").fast_info.get("last_price", 0))
+                except Exception:
+                    pass
+            _snap_regime = "Unknown"
+            try:
+                _snap_regime, _, _ = _get_market_context()
+            except Exception:
+                pass
+            save_daily_snapshot(_snap_val, _snap_spy, positions_df, regime=_snap_regime)
+        except Exception:
+            pass
+
+    # ── Sub-tabs ──────────────────────────────────────────────────────────────
+    jt_equity, jt_log, jt_add = st.tabs(["Equity Curve", "Trade Log", "Log a Trade"])
+
+    # ── Equity Curve ──────────────────────────────────────────────────────────
+    with jt_equity:
+        _history = get_portfolio_history(days=365)
+        if _history.empty:
+            st.info("No daily snapshots yet. Come back after the app has been open for a few days — it auto-saves a snapshot each visit.")
+        else:
+            _eq = compute_equity_curve(_history)
+            if not _eq.empty:
+                # Summary metrics
+                _pnorm_last = float(_eq["portfolio_norm"].iloc[-1])
+                _bnorm_last = float(_eq["benchmark_norm"].iloc[-1])
+                _alpha_last  = float(_eq["alpha"].iloc[-1])
+                _port_ret    = (_pnorm_last / 100 - 1) * 100
+                _bench_ret   = (_bnorm_last / 100 - 1) * 100
+
+                mc1, mc2, mc3, mc4 = st.columns(4)
+                mc1.metric("Portfolio Return",  f"{_port_ret:+.2f}%")
+                mc2.metric("SPY Return",        f"{_bench_ret:+.2f}%")
+                mc3.metric("Alpha (vs SPY)",    f"{_alpha_last:+.2f}%",
+                           delta_color="normal")
+                mc4.metric("Days Tracked",      len(_eq))
+
+                # Equity curve chart
+                fig_eq = go.Figure()
+                fig_eq.add_trace(go.Scatter(
+                    x=_eq.index, y=_eq["portfolio_norm"],
+                    name="Portfolio", line=dict(color=ACCENT, width=2),
+                    fill="tozeroy", fillcolor="rgba(34,211,238,0.06)",
+                ))
+                fig_eq.add_trace(go.Scatter(
+                    x=_eq.index, y=_eq["benchmark_norm"],
+                    name="SPY", line=dict(color=DIM, width=1.5, dash="dash"),
+                ))
+                fig_eq.add_hline(y=100, line_color=BORDER, line_dash="dot", line_width=1)
+                fig_eq.update_layout(**carbon_plotly_layout(
+                    height=380,
+                    title="Portfolio vs SPY (Normalised to 100)",
+                    hovermode="x unified",
+                ))
+                fig_eq.update_layout(yaxis=dict(title="Indexed (Base=100)"))
+                st.plotly_chart(fig_eq, use_container_width=True)
+
+                # Alpha area chart
+                fig_al = go.Figure()
+                _alpha_pos = _eq["alpha"].clip(lower=0)
+                _alpha_neg = _eq["alpha"].clip(upper=0)
+                fig_al.add_trace(go.Scatter(
+                    x=_eq.index, y=_alpha_pos, name="Outperformance",
+                    fill="tozeroy", fillcolor="rgba(34,197,94,0.18)",
+                    line=dict(color=GAIN, width=1),
+                ))
+                fig_al.add_trace(go.Scatter(
+                    x=_eq.index, y=_alpha_neg, name="Underperformance",
+                    fill="tozeroy", fillcolor="rgba(239,68,68,0.18)",
+                    line=dict(color=LOSS, width=1),
+                ))
+                fig_al.add_hline(y=0, line_color=BORDER, line_width=1)
+                fig_al.update_layout(**carbon_plotly_layout(
+                    height=200, title="Alpha vs SPY (Portfolio − Benchmark)",
+                ))
+                fig_al.update_layout(yaxis=dict(title="Alpha (pp)"))
+                st.plotly_chart(fig_al, use_container_width=True)
+
+    # ── Trade Log ─────────────────────────────────────────────────────────────
+    with jt_log:
+        _jl_col1, _jl_col2, _jl_col3 = st.columns([2, 2, 1])
+        _jl_ticker_filter = _jl_col1.text_input("Filter by Ticker", "", key="_jl_tf").upper().strip()
+        _jl_start = _jl_col2.date_input("From", value=None, key="_jl_sd")
+        _jl_end   = _jl_col3.date_input("To",   value=None, key="_jl_ed")
+
+        _trades = get_trades(
+            ticker=_jl_ticker_filter or None,
+            start_date=str(_jl_start) if _jl_start else None,
+            end_date=str(_jl_end)     if _jl_end   else None,
+        )
+
+        if _trades.empty:
+            st.info("No trades logged yet. Use the **Log a Trade** tab to record trades.")
+        else:
+            _trades = compute_trade_pnl(_trades)
+
+            # Summary P&L
+            _realised = _trades["realised_pnl"].dropna().sum()
+            _n_trades = len(_trades)
+            _winners  = (_trades["realised_pnl"] > 0).sum()
+            _losers   = (_trades["realised_pnl"] < 0).sum()
+            _wr       = _winners / max(_winners + _losers, 1) * 100
+
+            sc1, sc2, sc3, sc4 = st.columns(4)
+            sc1.metric("Total Trades",    _n_trades)
+            sc2.metric("Realised P&L",    f"${_realised:+,.2f}",
+                       delta_color="normal")
+            sc3.metric("Win Rate",        f"{_wr:.1f}%")
+            sc4.metric("Wins / Losses",   f"{_winners} / {_losers}")
+
+            # Table
+            _display = _trades[[
+                "id","date","ticker","action","shares","price",
+                "total_value","cost_basis","realised_pnl","realised_pnl_pct",
+                "regime","source","notes"
+            ]].copy()
+            _display.columns = [
+                "ID","Date","Ticker","Action","Shares","Price",
+                "Total","Cost Basis","Real. P&L","P&L %",
+                "Regime","Source","Notes"
+            ]
+            flex_table(
+                _display,
+                columns=[
+                    {"key": "ID",        "label": "ID",       "width": "4%",  "align": "right",  "numeric": True},
+                    {"key": "Date",      "label": "Date",     "width": "9%",  "align": "left"},
+                    {"key": "Ticker",    "label": "Ticker",   "width": "7%",  "align": "left"},
+                    {"key": "Action",    "label": "Action",   "width": "10%", "align": "center"},
+                    {"key": "Shares",    "label": "Shares",   "width": "7%",  "align": "right",  "numeric": True,
+                     "fmt": lambda v: f"{v:.4g}" if pd.notna(v) else "—"},
+                    {"key": "Price",     "label": "Price",    "width": "8%",  "align": "right",  "numeric": True,
+                     "fmt": lambda v: f"${v:.2f}" if pd.notna(v) else "—"},
+                    {"key": "Total",     "label": "Total $",  "width": "9%",  "align": "right",  "numeric": True,
+                     "fmt": lambda v: f"${v:,.2f}" if pd.notna(v) else "—"},
+                    {"key": "Real. P&L", "label": "Real. P&L","width": "9%",  "align": "right",  "numeric": True,
+                     "color_scale": "rg",
+                     "fmt": lambda v: f"${v:+,.2f}" if pd.notna(v) else "—"},
+                    {"key": "P&L %",     "label": "P&L %",   "width": "7%",  "align": "right",  "numeric": True,
+                     "color_scale": "rg",
+                     "fmt": lambda v: f"{v:+.1f}%" if pd.notna(v) else "—"},
+                    {"key": "Regime",    "label": "Regime",   "width": "10%", "align": "left"},
+                    {"key": "Source",    "label": "Source",   "width": "7%",  "align": "center"},
+                    {"key": "Notes",     "label": "Notes",    "width": "13%", "align": "left"},
+                ],
+                key="trade_log_tbl",
+            )
+
+            # Delete trade
+            with st.expander("Delete a Trade"):
+                _del_id = st.number_input("Trade ID to delete", min_value=1, step=1, key="_del_tid")
+                if st.button("Delete", type="secondary", key="_del_btn"):
+                    if delete_trade(int(_del_id)):
+                        st.success(f"Trade #{_del_id} deleted.")
+                        st.rerun()
+                    else:
+                        st.error("Could not delete trade.")
+
+    # ── Log a Trade ───────────────────────────────────────────────────────────
+    with jt_add:
+        st.markdown("#### Manually Record a Trade")
+        with st.form("log_trade_form", clear_on_submit=True):
+            _fa, _fb, _fc = st.columns(3)
+            _lt_ticker  = _fa.text_input("Ticker", placeholder="AAPL").upper().strip()
+            _lt_action  = _fb.selectbox("Action", ["BUY", "SELL", "REBALANCE", "OPTION_BUY", "OPTION_SELL"])
+            _lt_source  = _fc.selectbox("Source", ["manual", "paper", "imported"])
+
+            _fd, _fe, _ff = st.columns(3)
+            _lt_shares  = _fd.number_input("Shares / Contracts", min_value=0.0, step=1.0)
+            _lt_price   = _fe.number_input("Price ($)", min_value=0.0, step=0.01)
+            _lt_cb      = _ff.number_input("Cost Basis / Avg Price ($)", min_value=0.0, step=0.01,
+                                            help="Used to compute realised P&L on sells")
+
+            _fg, _fh = st.columns([2, 3])
+            _lt_regime = _fg.text_input("Regime at trade", value="")
+            _lt_notes  = _fh.text_input("Notes", placeholder="Optional rationale")
+
+            # Options fields (optional)
+            with st.expander("Options fields (leave blank for stock trades)"):
+                _fo1, _fo2, _fo3 = st.columns(3)
+                _lt_strategy  = _fo1.text_input("Strategy", placeholder="Long Call")
+                _lt_opt_type  = _fo2.selectbox("Option Type", ["", "call", "put"])
+                _lt_strike    = _fo3.number_input("Strike ($)", min_value=0.0, step=0.5)
+                _lt_exp       = st.text_input("Expiration (YYYY-MM-DD)", "")
+
+            _submitted = st.form_submit_button("Log Trade", type="primary")
+
+        if _submitted:
+            if not _lt_ticker:
+                st.warning("Ticker is required.")
+            elif _lt_shares <= 0 or _lt_price <= 0:
+                st.warning("Shares and price must be > 0.")
+            else:
+                _new_id = log_trade(
+                    ticker=_lt_ticker,
+                    action=_lt_action,
+                    shares=_lt_shares,
+                    price=_lt_price,
+                    cost_basis=_lt_cb,
+                    regime=_lt_regime,
+                    notes=_lt_notes,
+                    source=_lt_source,
+                    strategy=_lt_strategy,
+                    option_type=_lt_opt_type,
+                    strike=_lt_strike,
+                    expiration=_lt_exp,
+                )
+                st.success(f"Trade logged (ID #{_new_id}): {_lt_action} {_lt_shares} {_lt_ticker} @ ${_lt_price:.2f}")
+                st.rerun()

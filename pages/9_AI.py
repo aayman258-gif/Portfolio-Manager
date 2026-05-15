@@ -49,14 +49,19 @@ SYSTEM_PROMPT = """You are the in-app AI assistant for a local Streamlit portfol
 
 You help the user understand and act on:
 - Portfolio holdings, allocation, and P&L context
-- Market regime detection outputs (Low Vol / High Vol / Trending / Mean Reversion) and their implications
+- Market regime detection (Risk-On / Caution / High Volatility / Stagflation / Recession / Mean Reversion) and their implications
+- FRED macro indicators: yield curve spread, HY credit spread, CPI YoY, Fed Funds rate, real rate, unemployment
+- Upcoming macro events (FOMC, CPI, NFP) from the context and their expected market impact
+- Regime scores for individual portfolio positions (higher = better fit for current regime)
 - Portfolio optimization trade-offs and method selection
-- Rebalancing suggestions and trade plans
+- Rebalancing suggestions and trade plans tailored to the current regime
 - New position ideas (tickers + rationale) that the app will validate with live market data
 - Options strategy suggestions for existing positions (educational; user decides)
 
 Hard rules:
 - Use ONLY the provided CONTEXT SNAPSHOT for portfolio-specific facts and numbers. If data is missing, say so clearly and ask for it.
+- Reference macro_indicators and upcoming_events from the context when discussing macro risk.
+- Reference regime_scores when discussing which holdings are best/worst positioned for the current regime.
 - Do NOT invent tickers that are not publicly traded. Limit new position suggestions to 6 or fewer tickers.
 - When uncertain, ask clarifying questions rather than guessing.
 - Be concise and structured; use bullet points and numbered steps when helpful.
@@ -240,6 +245,55 @@ def _build_portfolio_summary() -> Dict[str, Any]:
     }
 
 
+def _build_macro_snapshot() -> Dict[str, Any]:
+    """Fetch latest FRED macro readings for AI context."""
+    try:
+        from data.fred_client import get_macro_snapshot
+        snap = get_macro_snapshot()
+        if snap:
+            return {k: round(v, 4) if isinstance(v, float) else v for k, v in snap.items()}
+    except Exception as e:
+        return {"error": str(e)}
+    return {}
+
+
+def _build_upcoming_events() -> List[Dict]:
+    """Return next 14 days of macro events for AI context."""
+    try:
+        from data.calendar_data import get_upcoming_events
+        evts = get_upcoming_events(days_ahead=14)
+        return [{"name": e["label"], "type": e["type"], "days_away": e["days"],
+                 "date": str(e["date"])} for e in evts]
+    except Exception:
+        return []
+
+
+def _build_regime_scores(tickers: List[str], regime: Optional[str]) -> Dict[str, float]:
+    """Score each portfolio ticker under the current regime."""
+    if not tickers or not regime:
+        return {}
+    try:
+        from calculations.scoring_engine import ScoringEngine
+        from calculations.regime_detector import RegimeDetector
+        scorer = ScoringEngine()
+        ml3 = MarketDataLoader()
+        det3 = RegimeDetector()
+        spy3 = ml3.load_index_data("SPY", "1y")
+        vix3 = ml3.load_vix_data("1y")
+        spx3, vxp3 = ml3.align_data(spy3, vix3)
+        reg3, sigs3 = det3.classify_regime(spx3, vxp3)
+        stock_data = {}
+        for t in tickers[:8]:  # cap at 8 to stay fast
+            try:
+                stock_data[t] = ml3.load_single_stock(t, period="1y")
+            except Exception:
+                pass
+        scores = scorer.score_portfolio(stock_data, reg3, sigs3)
+        return {t: round(float(v.get("composite", 50)), 1) for t, v in scores.items()}
+    except Exception:
+        return {}
+
+
 def _build_context_snapshot() -> Dict[str, Any]:
     try:
         regime, signals = _compute_current_regime()
@@ -247,17 +301,23 @@ def _build_context_snapshot() -> Dict[str, Any]:
     except Exception as e:
         regime, signals, regime_error = None, None, f"{type(e).__name__}: {e}"
 
+    portfolio = _build_portfolio_summary()
+    tickers   = portfolio.get("tickers", [])
+
     return {
-        "timestamp_utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-        "portfolio": _build_portfolio_summary(),
+        "timestamp_utc":    time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        "portfolio":        portfolio,
         "market_regime": {
             "current_regime": regime,
-            "signals": signals,
-            "error": regime_error,
+            "signals":        signals,
+            "error":          regime_error,
         },
+        "macro_indicators": _build_macro_snapshot(),
+        "upcoming_events":  _build_upcoming_events(),
+        "regime_scores":    _build_regime_scores(tickers, regime),
         "app_capabilities": {
             "optimizer_methods": ["max_sharpe", "min_volatility", "max_quadratic_utility"],
-            "data_source": "yfinance (free)",
+            "data_sources": ["Alpaca (real-time)", "FRED (macro)", "yfinance (fallback)"],
         },
     }
 

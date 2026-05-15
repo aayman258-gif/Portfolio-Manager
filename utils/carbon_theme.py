@@ -40,6 +40,8 @@ _NAV_ITEMS = [
     ("Watchlist",      "/Watchlist"),
     (None, None),
     ("AI",             "/AI"),
+    (None, None),
+    ("Paper Trading",  "/Paper_Trading"),
 ]
 
 _SANS      = "'Inter', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
@@ -1074,3 +1076,99 @@ render(ROWS);
 </script></body></html>"""
 
     _components.html(html, height=height, scrolling=False)
+
+
+# ── Alert System ──────────────────────────────────────────────────────────────
+
+def regime_alert_banner(current_regime: str) -> None:
+    """
+    Show a dismissible banner when the detected regime differs from the last
+    one stored in session state.  Call after apply_carbon_theme() on any page
+    that runs the regime detector.
+    """
+    if not current_regime:
+        return
+
+    _prev = st.session_state.get("_last_known_regime")
+
+    if _prev is not None and _prev != current_regime:
+        rc = regime_color(current_regime)
+        st.markdown(
+            f'<div style="background:{rc}18;border:2px solid {rc}66;border-radius:10px;'
+            f'padding:14px 20px;margin-bottom:16px;">'
+            f'<span style="font-size:11px;text-transform:uppercase;letter-spacing:0.12em;color:{rc};">Regime Change Detected</span>'
+            f'<div style="font-size:18px;font-weight:700;color:{rc};margin-top:4px;">'
+            f'{_prev} &nbsp;→&nbsp; {current_regime}</div>'
+            f'<div style="font-size:0.82rem;color:#cccccc;margin-top:6px;">'
+            f'The market regime has shifted. Review your allocation, risk limits, and strategy selection.</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    st.session_state["_last_known_regime"] = current_regime
+
+
+def position_alert_banners(positions_df, current_prices: dict) -> None:
+    """
+    Show inline alerts for positions with large drawdowns (>10%) or
+    positions worth less than 50% of cost basis.
+    positions_df must have columns: ticker, shares, cost_basis.
+    """
+    if positions_df is None or positions_df.empty:
+        return
+
+    alerts = []
+    for _, row in positions_df.iterrows():
+        t  = str(row.get("ticker", ""))
+        cb = float(row.get("cost_basis", 0) or 0)
+        px = float(current_prices.get(t, 0) or 0)
+        if cb > 0 and px > 0:
+            chg = (px - cb) / cb * 100
+            if chg <= -20:
+                alerts.append((t, chg, LOSS, "Major drawdown"))
+            elif chg <= -10:
+                alerts.append((t, chg, AMBER, "Significant drawdown"))
+
+    for t, chg, color, label in alerts:
+        st.markdown(
+            f'<div style="background:{color}12;border-left:3px solid {color};'
+            f'padding:8px 14px;margin-bottom:6px;border-radius:4px;">'
+            f'<span style="color:{color};font-weight:600;">{label}</span>'
+            f' — <span style="color:#e6edf3;">{t}</span>'
+            f' is <span style="color:{color};">{chg:+.1f}%</span> from cost basis.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+
+def macro_event_banner(events: list[dict]) -> None:
+    """
+    Show upcoming macro events (FOMC, CPI, NFP) as amber info banners.
+    events: list of dicts with keys: name (str), days_away (int).
+    """
+    imminent = [e for e in events if 0 <= e.get("days_away", 999) <= 3]
+    upcoming = [e for e in events if 3 < e.get("days_away", 999) <= 7]
+
+    for e in imminent:
+        label = "TODAY" if e["days_away"] == 0 else (
+            "TOMORROW" if e["days_away"] == 1 else f"IN {e['days_away']} DAYS"
+        )
+        st.markdown(
+            f'<div style="background:{AMBER}18;border:1px solid {AMBER}66;border-radius:8px;'
+            f'padding:10px 16px;margin-bottom:8px;">'
+            f'<span style="font-size:10px;text-transform:uppercase;letter-spacing:0.1em;color:{AMBER};">Event {label}</span>'
+            f'<div style="font-size:16px;font-weight:600;color:{AMBER};margin-top:2px;">{e["name"]}</div>'
+            f'<div style="font-size:0.80rem;color:#cccccc;">Consider reducing position size or hedging before this release.</div>'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
+
+    for e in upcoming:
+        st.markdown(
+            f'<div style="background:{SUBTLE}18;border-left:3px solid {AMBER}88;'
+            f'padding:8px 14px;margin-bottom:6px;border-radius:4px;font-size:0.82rem;">'
+            f'<span style="color:{AMBER};">Upcoming:</span> '
+            f'<span style="color:#cccccc;">{e["name"]}</span> in {e["days_away"]} days.'
+            f'</div>',
+            unsafe_allow_html=True,
+        )
