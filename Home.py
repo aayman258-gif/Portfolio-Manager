@@ -34,6 +34,9 @@ from utils.carbon_theme import (
 from utils.portfolio_store import (
     save_portfolio, load_portfolio, portfolio_file_exists, get_last_saved_time,
     save_options_positions, load_options_positions,
+    list_portfolios, create_portfolio, delete_portfolio, rename_portfolio,
+    get_active_portfolio, set_active_portfolio, get_portfolio_metadata,
+    update_portfolio_metadata, restore_portfolio_to_session,
 )
 from data.trade_journal import (
     log_trade, get_trades, delete_trade,
@@ -207,6 +210,138 @@ def _live_option(underlying, option_type, strike, expiration, iv_fallback=0.3):
 # PORTFOLIO INPUT PANEL (inline — no sidebar)
 # ══════════════════════════════════════════════════════════════════════════════
 
+# ── Portfolio Switcher (above the expander) ───────────────────────────────────
+_all_portfolios   = list_portfolios()
+_active_name      = get_active_portfolio()
+_portfolio_names  = [p["name"] for p in _all_portfolios] or ["Default"]
+_active_idx       = _portfolio_names.index(_active_name) if _active_name in _portfolio_names else 0
+
+_sw_col1, _sw_col2, _sw_col3, _sw_col4 = st.columns([3, 1, 1, 1])
+
+with _sw_col1:
+    _selected_name = st.selectbox(
+        "Active Portfolio",
+        _portfolio_names,
+        index=_active_idx,
+        key="_portfolio_switcher",
+        label_visibility="collapsed",
+        help="Switch active portfolio",
+    )
+    if _selected_name != _active_name:
+        set_active_portfolio(_selected_name)
+        st.session_state.pop("positions", None)
+        st.session_state.pop("options_positions", None)
+        st.rerun()
+
+with _sw_col2:
+    _meta = get_portfolio_metadata(_active_name)
+    _meta_tag = _meta.get("strategy") or _meta.get("risk_level") or ""
+    if _meta_tag:
+        st.markdown(
+            f'<div style="padding:6px 0;font-size:0.78rem;color:{AMBER};">{_meta_tag}</div>',
+            unsafe_allow_html=True,
+        )
+
+with _sw_col3:
+    if st.button("+ New Portfolio", type="secondary", key="_new_port_btn"):
+        st.session_state["_show_new_port"] = True
+
+with _sw_col4:
+    if st.button("⚙ Manage", type="secondary", key="_manage_port_btn"):
+        st.session_state["_show_manage_port"] = not st.session_state.get("_show_manage_port", False)
+
+# New portfolio dialog
+if st.session_state.get("_show_new_port"):
+    with st.form("new_portfolio_form", clear_on_submit=True):
+        _np1, _np2, _np3, _np4 = st.columns(4)
+        _np_name  = _np1.text_input("Portfolio Name", placeholder="Growth Portfolio")
+        _np_strat = _np2.selectbox("Strategy", ["", "Long-Only", "Hedged", "Options-Focus",
+                                                  "Income", "Aggressive Growth", "Conservative"])
+        _np_risk  = _np3.selectbox("Risk Level",  ["", "Conservative", "Moderate", "Aggressive"])
+        _np_desc  = _np4.text_input("Description", placeholder="Optional notes")
+        _np_submit = st.form_submit_button("Create Portfolio", type="primary")
+    if _np_submit and _np_name.strip():
+        _clean = _np_name.strip()
+        if create_portfolio(_clean, description=_np_desc, strategy=_np_strat, risk_level=_np_risk):
+            set_active_portfolio(_clean)
+            st.session_state.pop("positions", None)
+            st.session_state.pop("options_positions", None)
+            st.session_state["_show_new_port"] = False
+            st.success(f"Created portfolio '{_clean}' and switched to it.")
+            st.rerun()
+        else:
+            st.error(f"A portfolio named '{_clean}' already exists.")
+
+# Manage portfolios panel
+if st.session_state.get("_show_manage_port"):
+    with st.expander("Manage Portfolios", expanded=True):
+        _mp_data = list_portfolios()
+        if _mp_data:
+            _mp_df = pd.DataFrame(_mp_data)[["name", "strategy", "risk_level",
+                                              "num_positions", "updated_at", "description"]]
+            _mp_df.columns = ["Name", "Strategy", "Risk", "Positions", "Last Updated", "Description"]
+            _mp_df["Last Updated"] = _mp_df["Last Updated"].str[:16]
+            flex_table(
+                _mp_df,
+                columns=[
+                    {"key": "Name",        "label": "Name",       "width": "18%", "align": "left"},
+                    {"key": "Strategy",    "label": "Strategy",   "width": "16%", "align": "left"},
+                    {"key": "Risk",        "label": "Risk",       "width": "14%", "align": "left"},
+                    {"key": "Positions",   "label": "Positions",  "width": "10%", "align": "right", "numeric": True},
+                    {"key": "Last Updated","label": "Updated",    "width": "15%", "align": "left"},
+                    {"key": "Description", "label": "Description","width": "27%", "align": "left"},
+                ],
+                key="manage_portfolios_tbl",
+            )
+
+        _del_col, _ren_col, _meta_col = st.columns(3)
+        with _del_col:
+            _del_names = [p["name"] for p in _mp_data if p["name"] != "Default"]
+            if _del_names:
+                _to_del = st.selectbox("Delete portfolio", _del_names, key="_del_port_sel")
+                if st.button("Delete", type="secondary", key="_del_port_btn"):
+                    if delete_portfolio(_to_del):
+                        st.session_state.pop("positions", None)
+                        st.success(f"Deleted '{_to_del}'.")
+                        st.rerun()
+                    else:
+                        st.error("Cannot delete Default portfolio.")
+
+        with _ren_col:
+            _ren_names = [p["name"] for p in _mp_data if p["name"] != "Default"]
+            if _ren_names:
+                _to_ren = st.selectbox("Rename portfolio", _ren_names, key="_ren_port_sel")
+                _new_ren_name = st.text_input("New name", key="_ren_port_name")
+                if st.button("Rename", type="secondary", key="_ren_port_btn") and _new_ren_name.strip():
+                    if rename_portfolio(_to_ren, _new_ren_name.strip()):
+                        st.success(f"Renamed to '{_new_ren_name.strip()}'.")
+                        st.rerun()
+                    else:
+                        st.error("Rename failed — name already exists or can't rename Default.")
+
+        with _meta_col:
+            _edit_meta_name = st.selectbox("Edit metadata for", _portfolio_names, key="_edit_meta_sel")
+            _cur_meta = get_portfolio_metadata(_edit_meta_name)
+            _new_strat = st.selectbox("Strategy", ["", "Long-Only", "Hedged", "Options-Focus",
+                                                    "Income", "Aggressive Growth", "Conservative"],
+                                       index=["", "Long-Only", "Hedged", "Options-Focus",
+                                              "Income", "Aggressive Growth", "Conservative"].index(
+                                           _cur_meta.get("strategy", "")) if _cur_meta.get("strategy", "") in
+                                       ["", "Long-Only", "Hedged", "Options-Focus",
+                                        "Income", "Aggressive Growth", "Conservative"] else 0,
+                                       key="_edit_meta_strat")
+            _new_risk = st.selectbox("Risk Level", ["", "Conservative", "Moderate", "Aggressive"],
+                                      index=["", "Conservative", "Moderate", "Aggressive"].index(
+                                          _cur_meta.get("risk_level", "")) if _cur_meta.get("risk_level", "") in
+                                      ["", "Conservative", "Moderate", "Aggressive"] else 0,
+                                      key="_edit_meta_risk")
+            _new_desc = st.text_input("Description", value=_cur_meta.get("description", ""),
+                                       key="_edit_meta_desc")
+            if st.button("Save Metadata", type="primary", key="_edit_meta_btn"):
+                update_portfolio_metadata(_edit_meta_name, _new_desc, _new_strat, _new_risk)
+                st.success("Metadata updated.")
+                st.rerun()
+
 # Auto-load saved portfolio on first visit
 if 'options_positions' not in st.session_state:
     st.session_state['options_positions'] = []
@@ -227,8 +362,8 @@ positions_df = None
 # Determine label for the expander
 _port_loaded = 'positions' in st.session_state and st.session_state['positions'] is not None
 _port_label = (
-    f"◈ Portfolio — {len(st.session_state['positions'])} positions loaded  (click to update)"
-    if _port_loaded else "◈ Load Portfolio  ▸ click to expand"
+    f"◈ {_active_name} — {len(st.session_state['positions'])} positions  (click to update)"
+    if _port_loaded else f"◈ {_active_name}  ▸ click to load positions"
 )
 
 with st.expander(_port_label, expanded=not _port_loaded):
@@ -254,7 +389,7 @@ with st.expander(_port_label, expanded=not _port_loaded):
                     st.caption(f"Last saved: {datetime.fromisoformat(_last).strftime('%Y-%m-%d %H:%M')}")
                 except Exception:
                     pass
-            if st.button("Load Saved Portfolio", key="load_saved_btn"):
+            if st.button(f"Load '{_active_name}'", key="load_saved_btn"):
                 loaded = load_portfolio()
                 if loaded is not None:
                     st.session_state['positions'] = loaded
@@ -262,10 +397,10 @@ with st.expander(_port_label, expanded=not _port_loaded):
                     _ro = load_options_positions()
                     if _ro:
                         st.session_state['options_positions'] = _ro
-                    st.success(f"Loaded {len(loaded)} positions!")
+                    st.success(f"Loaded {len(loaded)} positions from '{_active_name}'!")
                     st.rerun()
                 else:
-                    st.error("Could not load saved portfolio.")
+                    st.error(f"No saved positions found for '{_active_name}'.")
 
     st.divider()
 

@@ -42,6 +42,7 @@ _NAV_ITEMS = [
     ("AI",             "/AI"),
     (None, None),
     ("Paper Trading",  "/Paper_Trading"),
+    ("Compare",        "/Portfolio_Compare"),
 ]
 
 _SANS      = "'Inter', 'Geist', -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif"
