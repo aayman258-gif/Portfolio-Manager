@@ -405,10 +405,8 @@ try:
                     yaxis='y2',
                 ))
                 fig_yc.add_hline(y=0, line_dash="dash", line_color=LOSS, opacity=0.5, yref='y2')
-                fig_yc.update_layout(
-                    **carbon_plotly_layout(height=300),
-                    legend=dict(orientation='h', y=-0.25),
-                )
+                fig_yc.update_layout(**carbon_plotly_layout(height=300))
+                fig_yc.update_layout(legend=dict(orientation='h', y=-0.25))
                 fig_yc.update_layout(
                     yaxis=dict(title="Yield (%)", gridcolor='rgba(107,122,143,0.15)'),
                     yaxis2=dict(title="Spread (%)", overlaying='y', side='right',
@@ -477,10 +475,8 @@ try:
                         fill='tozeroy', fillcolor='rgba(167,139,250,0.08)',
                     ))
                 fig_fed.add_hline(y=0, line_dash="dash", line_color=BORDER, opacity=0.5)
-                fig_fed.update_layout(
-                    **carbon_plotly_layout(height=300),
-                    legend=dict(orientation='h', y=-0.25),
-                )
+                fig_fed.update_layout(**carbon_plotly_layout(height=300))
+                fig_fed.update_layout(legend=dict(orientation='h', y=-0.25))
                 fig_fed.update_yaxes(title_text="Rate (%)", gridcolor='rgba(107,122,143,0.15)')
                 st.plotly_chart(fig_fed, use_container_width=True)
             else:
